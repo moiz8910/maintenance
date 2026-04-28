@@ -1,0 +1,216 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import { 
+  Sparkles, 
+  Loader2, 
+  Calendar, 
+  Filter, 
+  Download,
+  AlertCircle,
+  X
+} from 'lucide-react';
+import { 
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend 
+} from 'recharts';
+
+const COLORS = ['#0f172a', '#6366f1', '#10b981', '#f59e0b', '#ef4444'];
+
+interface DrilldownViewProps {
+  kpiId: string;
+  onClose: () => void;
+}
+
+const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [aiInsight, setAiInsight] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/drilldown/${kpiId}`);
+        const json = await res.json();
+        console.log(`[Stage 8] Drilldown Data Fetched for: ${kpiId}`);
+        setData(json);
+      } catch (e) {
+        console.error(`[Stage 8] Error fetching drilldown data:`, e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [kpiId]);
+
+  const getAiInsight = async () => {
+    setAiLoading(true);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          message: "Explain this data and suggest maintenance improvements.",
+          context_data: data 
+        })
+      });
+      const json = await res.json();
+      console.log("[Stage 9] AI Insights Generated Successfully");
+      setAiInsight(json.answer);
+    } catch (e) {
+      console.error("[Stage 9] Error generating AI insights:", e);
+      setAiInsight("Error generating insights.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="w-full h-[400px] flex items-center justify-center">
+        <Loader2 className="animate-spin text-indigo-600" size={32} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-black text-slate-900 capitalize tracking-tight">
+            {kpiId.replace(/-/g, ' ')} Deep-Dive
+          </h2>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+            Real-time Analytical Engine
+          </p>
+        </div>
+        <button 
+          onClick={onClose}
+          className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+        >
+          <X size={20} className="text-slate-400" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 space-y-6">
+          <div className="modular-container h-[400px]">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{data?.title}</h3>
+              <div className="flex gap-2">
+                <button className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors">
+                  <Filter size={14} />
+                </button>
+                <button className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors">
+                  <Download size={14} />
+                </button>
+              </div>
+            </div>
+            
+            <ResponsiveContainer width="100%" height="80%">
+              {data?.chartType === 'line' ? (
+                <LineChart data={data.data}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
+                  <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                  <Line type="monotone" dataKey="planned" stroke="#0f172a" strokeWidth={2} dot={{r: 3}} />
+                  <Line type="monotone" dataKey="actual" stroke="#6366f1" strokeWidth={2} dot={{r: 4}} />
+                </LineChart>
+              ) : data?.chartType === 'grouped-bar' ? (
+                <BarChart data={data.data}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
+                  <Tooltip cursor={{fill: '#f8fafc'}} />
+                  <Bar dataKey={Object.keys(data.data[0])[1]} fill="#0f172a" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={Object.keys(data.data[0])[2]} fill="#6366f1" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              ) : data?.chartType === 'table' ? (
+                <div className="overflow-auto h-full rounded-xl border border-slate-50">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr>
+                        {Object.keys(data.data[0]).map(k => (
+                          <th key={k} className="px-4 py-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">{k}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {data.data.map((row: any, i: number) => (
+                        <tr key={i} className="hover:bg-slate-50/50">
+                          {Object.values(row).map((v: any, j) => (
+                            <td key={j} className="px-4 py-2 text-[10px] font-bold text-slate-700">{v}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <BarChart data={data.data} layout={data?.chartType === 'horizontal-bar' ? 'vertical' : 'horizontal'}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  {data?.chartType === 'horizontal-bar' ? (
+                    <>
+                      <XAxis type="number" hide />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 8, fontWeight: 700}} width={80} />
+                    </>
+                  ) : (
+                    <>
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} dy={10} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
+                    </>
+                  )}
+                  <Tooltip cursor={{fill: '#f8fafc'}} />
+                  <Bar dataKey={Object.keys(data.data[0])[1] || 'count'} radius={[4, 4, 4, 4]} barSize={24}>
+                    {data.data.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              )}
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="modular-container border-indigo-100 bg-indigo-50/10 p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Sparkles className="text-indigo-600" size={16} fill="currentColor" />
+              <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">AI Insights</h3>
+            </div>
+
+            {aiInsight ? (
+              <div className="text-[10px] font-medium text-slate-700 leading-relaxed bg-white p-4 rounded-xl border border-slate-100 shadow-sm whitespace-pre-line max-h-[300px] overflow-y-auto">
+                {aiInsight}
+              </div>
+            ) : (
+              <button 
+                onClick={getAiInsight}
+                disabled={aiLoading}
+                className="w-full py-3 grad-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+              >
+                {aiLoading ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                Generate Analysis
+              </button>
+            )}
+          </div>
+          
+          <div className="modular-container p-5">
+             <div className="flex items-center gap-2 mb-4">
+              <AlertCircle className="text-amber-500" size={16} />
+              <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Quick Actions</h3>
+            </div>
+            <button className="w-full text-left p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all">
+               <p className="text-[9px] font-black text-slate-900 uppercase tracking-widest">Export Dataset</p>
+               <p className="text-[8px] text-slate-400 font-bold">Download as CSV/JSON</p>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default DrilldownView;
