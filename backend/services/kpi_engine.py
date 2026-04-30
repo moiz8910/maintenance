@@ -1,6 +1,7 @@
 import sqlite3
+import os
 
-DB_PATH = "c:/Users/Moiz/Desktop/Maintainence/backend/maintenance.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "maintenance.db")
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)

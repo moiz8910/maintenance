@@ -34,9 +34,7 @@ load_dotenv()
 import time
 
 # Robust DB Path
-DB_PATH = "c:/Users/Moiz/Desktop/Maintainence/backend/maintenance.db"
-if not os.path.exists(DB_PATH):
-    DB_PATH = os.path.join(os.getcwd(), "maintenance.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "maintenance.db")
 
 def generate_with_retry(model, contents, max_retries=3):
     for i in range(max_retries):

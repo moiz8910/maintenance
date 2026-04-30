@@ -20,7 +20,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
-    db_path: str = "c:/Users/Moiz/Desktop/Maintainence/backend/maintenance.db"
+    db_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "maintenance.db")
     model_config = {"env_file": ".env"}
 
 settings = Settings()

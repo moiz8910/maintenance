@@ -1,7 +1,8 @@
 import pandas as pd
 import json
 
-file_path = "c:/Users/Moiz/Desktop/Maintainence/Vedanta_Jharsuguda_Maintenance_Dummy_Data.xlsx"
+import os
+file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Vedanta_Jharsuguda_Maintenance_Dummy_Data.xlsx")
 
 try:
     xl = pd.ExcelFile(file_path)

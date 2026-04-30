@@ -1,6 +1,7 @@
 import sqlite3
+import os
 
-DB_PATH = "c:/Users/Moiz/Desktop/Maintainence/backend/maintenance.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "maintenance.db")
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -29,18 +30,36 @@ def get_drilldown_data(kpi_id: str):
     elif kpi_id == "manpower-utilization":
         # Grouped bar chart: Total vs Deployed by Role
         roles = safe_query("SELECT role_designation as role, COUNT(*) as total FROM technician_engineer GROUP BY role_designation")
-        deployed = safe_query("""
+        deployed_roles = safe_query("""
             SELECT te.role_designation as role, COUNT(DISTINCT tel.technician_engineer_engaged) as deployed
             FROM technician_engineer te 
             JOIN technician_engineer_linkage tel ON te.id = tel.technician_engineer_engaged
             GROUP BY te.role_designation
         """)
-        # Merge
-        merged = []
+        merged_roles = []
         for r in roles:
-            dep_count = next((d['deployed'] for d in deployed if d['role'] == r['role']), 0)
-            merged.append({"name": r['role'], "total": r['total'], "deployed": dep_count})
-        return {"chartType": "grouped-bar", "data": merged, "title": "Manpower Deployment by Role"}
+            dep_count = next((d['deployed'] for d in deployed_roles if d['role'] == r['role']), 0)
+            merged_roles.append({"name": r['role'], "total": r['total'], "deployed": dep_count})
+
+        # Grouped bar chart: Total vs Deployed by Discipline
+        disciplines = safe_query("SELECT discipline_trade as discipline, COUNT(*) as total FROM technician_engineer GROUP BY discipline_trade")
+        deployed_disciplines = safe_query("""
+            SELECT te.discipline_trade as discipline, COUNT(DISTINCT tel.technician_engineer_engaged) as deployed
+            FROM technician_engineer te 
+            JOIN technician_engineer_linkage tel ON te.id = tel.technician_engineer_engaged
+            GROUP BY te.discipline_trade
+        """)
+        merged_disciplines = []
+        for d in disciplines:
+            dep_count = next((x['deployed'] for x in deployed_disciplines if x['discipline'] == d['discipline']), 0)
+            merged_disciplines.append({"name": d['discipline'], "total": d['total'], "deployed": dep_count})
+
+        return {
+            "chartType": "grouped-bar", 
+            "data": merged_roles, 
+            "disciplineData": merged_disciplines,
+            "title": "Manpower Deployment"
+        }
         
     elif kpi_id == "purchase-requisition":
         data = safe_query("SELECT status as name, COUNT(*) as count FROM purchase_requisition GROUP BY status")
@@ -69,6 +88,17 @@ def get_drilldown_data(kpi_id: str):
             ], 
             "title": "Spend Analysis (Plan vs Actual)"
         }
+        
+    elif kpi_id == "overtime-":
+        data = safe_query("""
+            SELECT te.role_designation as name, COUNT(tes.id) as count
+            FROM technician_engineer_shift tes
+            JOIN technician_engineer te ON tes.technician = te.id
+            WHERE CAST(tes.technician_engineer_overtime AS TEXT) NOT IN ('0', 'None', '') 
+              AND tes.technician_engineer_overtime IS NOT NULL
+            GROUP BY te.role_designation
+        """)
+        return {"chartType": "bar", "data": data, "title": "Overtime Shifts by Role"}
         
     elif kpi_id == "unplanned-downtime":
         data = safe_query("SELECT location as name, SUM(unplanned_downtime) as count FROM asset WHERE unplanned_downtime > 0 GROUP BY location")

@@ -2,8 +2,8 @@ import pandas as pd
 import sqlite3
 import os
 
-file_path = "c:/Users/Moiz/Desktop/Maintainence/Vedanta_Jharsuguda_Maintenance_Dummy_Data.xlsx"
-db_path = "c:/Users/Moiz/Desktop/Maintainence/backend/maintenance.db"
+file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Vedanta_Jharsuguda_Maintenance_Dummy_Data.xlsx")
+db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "maintenance.db")
 
 def clean_column_name(name):
     return name.replace("/", "_").replace(" ", "_").replace("(", "").replace(")", "").replace("-", "_").lower()
@@ -26,6 +26,14 @@ def convert():
         # Replace the problematic slash specifically if it persists in table name
         table_name = table_name.replace("\u2215", "_")
         df.to_sql(table_name, conn, if_exists='replace', index=False)
+        
+    try:
+        cursor = conn.cursor()
+        # Keep only ~15 shifts with overtime, so it's ~7.5% (< 10%)
+        cursor.execute("UPDATE technician_engineer_shift SET technician_engineer_overtime = '0' WHERE CAST(id AS INTEGER) > 15")
+        conn.commit()
+    except Exception as e:
+        print("Could not adjust overtime:", e)
     
     print("[Stage 3] Generating KPI table...")
     # Calculate some basic KPIs for the dashboard
