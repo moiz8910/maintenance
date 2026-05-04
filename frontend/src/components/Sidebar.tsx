@@ -58,9 +58,6 @@ const Sidebar = () => {
       {/* Brand Header */}
       <div className="p-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 grad-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/30">
-            <Zap size={22} fill="currentColor" />
-          </div>
           <div>
             <h1 className="text-base font-black text-slate-900 tracking-tighter uppercase">OmniMaintain</h1>
             <p className="text-[10px] text-indigo-600 font-bold tracking-widest uppercase">AI Engine</p>
@@ -108,16 +105,6 @@ const Sidebar = () => {
         </div>
       </div>
 
-      {/* Sidebar Footer */}
-      <div className="p-4 border-t border-slate-100">
-        <button className="w-full flex items-center justify-between p-4 rounded-2xl bg-slate-900 text-white hover:bg-slate-800 transition-colors">
-          <div className="flex items-center gap-3">
-            <HelpCircle size={18} />
-            <span className="text-xs font-bold">Support Center</span>
-          </div>
-          <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px]">?</div>
-        </button>
-      </div>
     </aside>
   );
 };

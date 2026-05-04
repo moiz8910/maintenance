@@ -14,6 +14,18 @@ const ChatPanel = () => {
   const [input, setInput] = useState('');
   const { chatHistory, addChatMessage, isLoading, setLoading } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (isOpen && panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+        setIsFullscreen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -72,7 +84,7 @@ const ChatPanel = () => {
               <Sparkles size={20} fill="currentColor" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-slate-900 tracking-tight">AI Assistant</h2>
+              <h2 className="text-sm font-black text-slate-900 tracking-tight">Maintenance Co-pilot</h2>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Context-Aware Engine</p>
@@ -212,13 +224,13 @@ const ChatPanel = () => {
   );
 
   return (
-    <>
+    <div ref={panelRef}>
       {!isFullscreen && (
         <button 
           onClick={() => setIsOpen(!isOpen)}
           className="fixed bottom-6 right-6 w-14 h-14 grad-primary text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all z-[100] group"
         >
-          {isOpen ? <ChevronDown size={24} /> : <MessageSquare size={24} />}
+          {isOpen ? <ChevronDown size={24} /> : <span className="font-black text-lg tracking-widest">AI</span>}
         </button>
       )}
 
@@ -238,7 +250,7 @@ const ChatPanel = () => {
           </Resizable>
         )
       )}
-    </>
+    </div>
   );
 };
 

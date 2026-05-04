@@ -100,8 +100,8 @@ export default function Home() {
             <KPIStats onKpiClick={handleKpiClick} activeKpi={activeKpi} />
           </section>
 
-          <section id="main-content-area" className="grid grid-cols-1 xl:grid-cols-3 gap-6 px-2 pb-8">
-            <div className="xl:col-span-2">
+          <section id="main-content-area" className="flex flex-col gap-6 px-2 pb-8">
+            <div className="w-full">
               {activeKpi ? (
                 <div className="modular-container p-6 animate-in fade-in zoom-in-95 duration-500">
                   <DrilldownView kpiId={activeKpi} onClose={() => setActiveKpi(null)} />
@@ -111,7 +111,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* Predictive Alerts Widget */}
+            {/* Insights Widget */}
             <div className="modular-container flex flex-col relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-bl-full -z-10 transition-transform group-hover:scale-110" />
 
@@ -120,7 +120,7 @@ export default function Home() {
                   <BellRing size={20} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Predictive Alerts</h3>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Insights</h3>
                   <p className="text-[10px] text-slate-400 font-bold mt-0.5">AI-Detected Anomalies</p>
                 </div>
               </div>

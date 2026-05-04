@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import ExecutionPlanModal from './ExecutionPlanModal';
 import { 
   Sparkles, 
   Loader2, 
@@ -27,6 +28,26 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
   const [aiInsight, setAiInsight] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [activeView, setActiveView] = useState<'role' | 'discipline'>('role');
+  const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [workOrdersData, setWorkOrdersData] = useState<any[]>([]);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | null>(null);
+  const [fetchingWo, setFetchingWo] = useState(false);
+
+  const handleBarClick = async (entry: any) => {
+    if (kpiId !== 'work-order') return;
+    const status = entry.name;
+    setSelectedStatus(status);
+    setFetchingWo(true);
+    try {
+      const res = await fetch(`/api/work-orders?status=${status}`);
+      const json = await res.json();
+      setWorkOrdersData(json);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFetchingWo(false);
+    }
+  };
 
   const toggleView = () => {
     setActiveView(prev => prev === 'role' ? 'discipline' : 'role');
@@ -40,6 +61,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
         const json = await res.json();
         console.log(`[Stage 8] Drilldown Data Fetched for: ${kpiId}`);
         setData(json);
+        getAiInsight(json);
       } catch (e) {
         console.error(`[Stage 8] Error fetching drilldown data:`, e);
       } finally {
@@ -49,7 +71,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
     fetchData();
   }, [kpiId]);
 
-  const getAiInsight = async () => {
+  const getAiInsight = async (contextData: any) => {
     setAiLoading(true);
     try {
       const res = await fetch('/api/chat', {
@@ -57,7 +79,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: "Explain this data and suggest maintenance improvements.",
-          context_data: data 
+          context_data: contextData 
         })
       });
       const json = await res.json();
@@ -100,29 +122,78 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 space-y-6">
-          <div className="modular-container h-[400px]">
+      <div className="flex flex-col gap-6">
+        <div className="w-full space-y-6">
+          <div className={selectedStatus ? "modular-container" : "modular-container h-[400px]"}>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{data?.title}</h3>
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                {selectedStatus ? `${selectedStatus} Work Orders` : data?.title}
+              </h3>
               <div className="flex gap-2">
-                {kpiId === 'manpower-utilization' && (
-                  <button 
-                    onClick={toggleView}
-                    className="px-2 py-1 text-[10px] font-bold rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
-                  >
-                    View by {activeView === 'role' ? 'Discipline' : 'Role'}
+                {selectedStatus ? (
+                  <button onClick={() => setSelectedStatus(null)} className="text-[10px] text-indigo-600 font-black uppercase tracking-widest px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors">
+                    &larr; Back to Chart
                   </button>
+                ) : (
+                  <>
+                    {kpiId === 'manpower-utilization' && (
+                      <button 
+                        onClick={toggleView}
+                        className="px-2 py-1 text-[10px] font-bold rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
+                      >
+                        View by {activeView === 'role' ? 'Discipline' : 'Role'}
+                      </button>
+                    )}
+                    <button className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors">
+                      <Filter size={14} />
+                    </button>
+                    <button className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors">
+                      <Download size={14} />
+                    </button>
+                  </>
                 )}
-                <button className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors">
-                  <Filter size={14} />
-                </button>
-                <button className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors">
-                  <Download size={14} />
-                </button>
               </div>
             </div>
-            
+
+            {selectedStatus ? (
+              fetchingWo ? (
+                <div className="flex items-center justify-center py-16"><Loader2 className="animate-spin text-indigo-600" size={24} /></div>
+              ) : (
+                <div className="overflow-auto rounded-xl border border-slate-100 bg-white">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 sticky top-0 shadow-sm">
+                      <tr>
+                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">ID</th>
+                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Class</th>
+                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Description</th>
+                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Status</th>
+                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {workOrdersData.map((row: any, i: number) => (
+                        <tr key={i} className="hover:bg-indigo-50/50 cursor-pointer transition-colors group" onClick={() => setSelectedWorkOrder(row.id)}>
+                          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600 group-hover:text-indigo-700 transition-colors">{row.id}</td>
+                          <td className="px-4 py-3 text-[10px] font-bold text-slate-700">
+                            <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{row.class}</span>
+                          </td>
+                          <td className="px-4 py-3 text-[10px] text-slate-600 max-w-[260px] truncate" title={row.description}>{row.description}</td>
+                          <td className="px-4 py-3 text-[10px] font-bold">
+                            <span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-full">{row.status}</span>
+                          </td>
+                          <td className="px-4 py-3 text-[10px]">
+                            <span className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold group-hover:bg-indigo-700 transition-colors">View Plan →</span>
+                          </td>
+                        </tr>
+                      ))}
+                      {workOrdersData.length === 0 && (
+                        <tr><td colSpan={5} className="px-4 py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">No work orders found.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : (
             <ResponsiveContainer width="100%" height="80%">
               {data?.chartType === 'line' ? (
                 <LineChart data={chartData}>
@@ -189,39 +260,35 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
                   )}
                   <Tooltip cursor={{fill: '#f8fafc'}} />
                   <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
-                  <Bar dataKey={Object.keys(chartData[0] || {})[1] || 'count'} radius={[4, 4, 4, 4]} barSize={24}>
+                  <Bar dataKey={Object.keys(chartData[0] || {})[1] || 'count'} radius={[4, 4, 4, 4]} barSize={24} onClick={handleBarClick}>
                     <LabelList dataKey={Object.keys(chartData[0] || {})[1] || 'count'} position={data?.chartType === 'horizontal-bar' ? "right" : "top"} style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
                     {chartData.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} cursor={kpiId === 'work-order' ? 'pointer' : 'default'} />
                     ))}
                   </Bar>
                 </BarChart>
               )}
             </ResponsiveContainer>
+            )}
           </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="modular-container border-indigo-100 bg-indigo-50/10 p-5">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="text-indigo-600" size={16} fill="currentColor" />
               <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">AI Insights</h3>
             </div>
 
-            {aiInsight ? (
-              <div className="text-[10px] font-medium text-slate-700 leading-relaxed bg-white p-4 rounded-xl border border-slate-100 shadow-sm whitespace-pre-line max-h-[300px] overflow-y-auto">
-                {aiInsight}
-              </div>
-            ) : (
-              <button 
-                onClick={getAiInsight}
-                disabled={aiLoading}
-                className="w-full py-3 grad-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
-              >
-                {aiLoading ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
-                Generate Analysis
-              </button>
-            )}
+            <div className="text-[10px] font-medium text-slate-700 leading-relaxed bg-white p-4 rounded-xl border border-slate-100 shadow-sm whitespace-pre-line max-h-[300px] overflow-y-auto min-h-[80px]">
+              {aiLoading ? (
+                <div className="flex items-center justify-center h-full w-full py-4">
+                  <Loader2 className="animate-spin text-indigo-600" size={16} />
+                </div>
+              ) : (
+                aiInsight || "No insights available."
+              )}
+            </div>
           </div>
           
           <div className="modular-container p-5">
@@ -236,6 +303,13 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
           </div>
         </div>
       </div>
+
+      {selectedWorkOrder && (
+        <ExecutionPlanModal 
+          workOrderId={selectedWorkOrder} 
+          onClose={() => setSelectedWorkOrder(null)} 
+        />
+      )}
     </div>
   );
 };
