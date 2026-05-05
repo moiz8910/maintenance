@@ -3,6 +3,7 @@ import os
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from google import genai
+import openai
 try:
     from .tools import (
         get_kpi_summary, get_work_orders, get_manpower_data, 
@@ -36,20 +37,47 @@ import time
 # Robust DB Path
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "maintenance.db")
 
-def generate_with_retry(model, contents, max_retries=3):
+# Initialize Clients
+MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "google").lower()
+google_api_key = os.getenv("GOOGLE_API_KEY")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+
+google_client = genai.Client(api_key=google_api_key) if google_api_key else None
+openai_client = openai.OpenAI(api_key=openai_api_key) if openai_api_key else None
+
+GEMINI_MODEL = "gemini-2.5-flash"
+OPENAI_MODEL = "gpt-4o"
+
+def generate_with_retry(prompt, system_prompt=None, max_retries=3):
     for i in range(max_retries):
         try:
-            return client.models.generate_content(model=model, contents=contents)
+            if MODEL_PROVIDER == "openai" and openai_client:
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                
+                response = openai_client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=messages
+                )
+                return response.choices[0].message.content
+            else:
+                # Default to Google
+                contents = [prompt]
+                if system_prompt:
+                    contents = [system_prompt, prompt]
+                
+                response = google_client.models.generate_content(
+                    model=GEMINI_MODEL, 
+                    contents=contents
+                )
+                return response.text
         except Exception as e:
-            if "503" in str(e) and i < max_retries - 1:
+            if ("503" in str(e) or "rate limit" in str(e).lower()) and i < max_retries - 1:
                 time.sleep(2 * (i + 1))
                 continue
             raise e
-
-# Initialize Gemini
-api_key = os.getenv("GOOGLE_API_KEY")
-client = genai.Client(api_key=api_key)
-MODEL_NAME = "gemini-2.5-flash"
 
 # --- Nodes ---
 
@@ -86,8 +114,8 @@ def classify_intent(state: AgentState):
     """
     
     try:
-        response = generate_with_retry(model=MODEL_NAME, contents=prompt)
-        intent = response.text.strip().upper()
+        response_text = generate_with_retry(prompt=prompt)
+        intent = response_text.strip().upper()
     except:
         intent = "GENERAL"
         
@@ -163,27 +191,27 @@ def validate_and_generate(state: AgentState):
     context = json.dumps(state['tools_data'], indent=2)
     
     system_prompt = """
-    You are a senior Industrial Maintenance AI Architect. 
-    You MUST answer ONLY using the provided Context Data.
-    DO NOT assume, guess, or fabricate information.
-    If the Context Data is empty or irrelevant to the question, respond with:
-    'I do not have sufficient data in the current system to answer this.'
+    You are a senior Industrial Maintenance AI Architect with deep expertise in Aluminum Smelter operations and general Asset Management.
+    
+    Your goal is to provide comprehensive insights by:
+    1. PRIORITIZING the provided Context Data (Live system metrics, KPIs, Assets, etc.).
+    2. BLENDING this local data with your external knowledge of industrial best practices, global benchmarks, and technical standards.
+    3. If the Context Data is missing or insufficient, state that clearly but still provide general expert advice based on the query.
     
     Format your response in structured Markdown:
     - Use bullet points for lists.
     - Use tables for structured data.
-    - Be technical and precise.
-    - Keep it professional.
+    - Be technical, precise, and professional.
     """
     
     user_prompt = f"Question: {state['query']}\n\nContext Data:\n{context}"
     
-    response = generate_with_retry(
-        model=MODEL_NAME,
-        contents=[system_prompt, user_prompt]
+    response_text = generate_with_retry(
+        prompt=user_prompt,
+        system_prompt=system_prompt
     )
     
-    state['answer'] = response.text
+    state['answer'] = response_text
     state['data_used'] = state['tools_data']
     state['confidence'] = "high" if state['tools_data'] else "low"
     

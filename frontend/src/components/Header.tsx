@@ -1,9 +1,21 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Bell, User, Wifi, WifiOff, ChevronDown, Calendar, Search, Globe } from 'lucide-react';
+import { Bell, User, Wifi, WifiOff, ChevronDown, Calendar, Search, Globe, LogOut } from 'lucide-react';
+import { useStore } from '@/store/useStore';
 
 const Header = () => {
   const [connected, setConnected] = useState(false);
+  const { setAuthenticated, searchQuery, setSearchQuery, setActiveKpi } = useStore();
+  
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    if (val.trim()) {
+      setActiveKpi('search');
+    } else {
+      setActiveKpi(null);
+    }
+  };
 
   useEffect(() => {
     const checkConn = () => {
@@ -28,6 +40,8 @@ const Header = () => {
           <input 
             type="text" 
             placeholder="Search assets, work orders, or manuals..."
+            value={searchQuery}
+            onChange={handleSearchChange}
             className="w-full h-11 bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-4 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all"
           />
         </div>
@@ -55,6 +69,14 @@ const Header = () => {
         <button className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-indigo-600 transition-all relative">
           <Bell size={20} />
           <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-indigo-500 rounded-full border-2 border-white" />
+        </button>
+
+        <button 
+          onClick={() => setAuthenticated(false)}
+          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-rose-600 transition-all shadow-lg shadow-slate-900/10"
+        >
+          <LogOut size={14} />
+          Log Out
         </button>
 
       </div>

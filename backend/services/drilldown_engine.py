@@ -66,16 +66,47 @@ def get_drilldown_data(kpi_id: str):
         return {"chartType": "bar", "data": data, "title": "PR Status Distribution"}
         
     elif kpi_id == "pm-adherence":
-        # Mocking monthly trend based on what we have
+        # Calculate weekly cumulative trend from April 1, 2026 to May 5, 2026
+        from datetime import datetime, timedelta
+        
+        start_date = datetime(2026, 4, 1)
+        end_date = datetime(2026, 5, 5)
+        
+        # Get all PMs
+        all_pms = safe_query("SELECT work_order_open_day, work_order_status FROM work_order WHERE repair_type='Preventive Maintenance'")
+        
+        trend_data = []
+        curr = start_date
+        week_num = 1
+        while curr <= end_date:
+            # For "Weekly" trend, we show the status at the end of each 7-day period
+            # or the current date if 7 days haven't passed
+            target_date = min(curr + timedelta(days=6), end_date)
+            
+            total_due = 0
+            completed = 0
+            for pm in all_pms:
+                try:
+                    d, m, y = map(int, pm['work_order_open_day'].split('-'))
+                    pm_date = datetime(2000 + y, m, d)
+                    if pm_date <= target_date:
+                        total_due += 1
+                        if pm['work_order_status'].lower() == 'closed':
+                            completed += 1
+                except: continue
+            
+            adherence = round((completed / total_due * 100), 1) if total_due > 0 else 0
+            trend_data.append({
+                "name": f"Week {week_num} ({target_date.strftime('%d %b')})",
+                "adherence": adherence
+            })
+            curr += timedelta(days=7)
+            week_num += 1
+
         return {
             "chartType": "line", 
-            "data": [
-                {"name": "Jan", "planned": 45, "actual": 40},
-                {"name": "Feb", "planned": 50, "actual": 48},
-                {"name": "Mar", "planned": 40, "actual": 39},
-                {"name": "Apr", "planned": 55, "actual": 51},
-            ], 
-            "title": "PM Planned vs Actual"
+            "data": trend_data, 
+            "title": "Weekly PM Adherence Trend (Since April 1st)"
         }
         
     elif kpi_id == "spend-variance":
@@ -138,15 +169,22 @@ def get_drilldown_data(kpi_id: str):
         }
         
     elif kpi_id == "safety-statistics":
-        return {
-            "chartType": "bar",
-            "data": [
-                {"name": "Near Miss", "count": 4},
-                {"name": "LTI", "count": 1},
-                {"name": "First Aid", "count": 7},
-            ],
-            "title": "Incident Types Distribution"
-        }
+        conn = get_conn()
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(incident_events)")
+        cols = [r[1] for r in cursor.fetchall()]
+        
+        type_col = "incident_type"
+        for c in ['incident_type', 'type', 'event_type', 'incident_category', 'category', 'incident_class']:
+            if c in cols:
+                type_col = c
+                break
+        if type_col not in cols and cols:
+            type_col = cols[1] if len(cols) > 1 else cols[0]
+            
+        conn.close()
+        data = safe_query(f"SELECT {type_col} as name, COUNT(*) as count FROM incident_events GROUP BY {type_col}")
+        return {"chartType": "bar", "data": data, "title": "Incident Types Distribution"}
     
     # Fallback
     return {"chartType": "bar", "data": [{"name": "No Data", "count": 0}], "title": "Data Unavailable"}

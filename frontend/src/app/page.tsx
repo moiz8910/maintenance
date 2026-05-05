@@ -3,16 +3,28 @@
 import React, { useEffect, useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import KPIStats from '@/components/KPIStats';
-import WorkOrderChart from '@/components/WorkOrderChart';
+
 import ChatPanel from '@/components/ChatPanel';
 import Header from '@/components/Header';
 import DrilldownView from '@/components/DrilldownView';
+import LoginPage from '@/components/LoginPage';
+import MaintenanceSchedule from '@/components/MaintenanceSchedule';
+import AssetView from '@/components/AssetView';
+import SearchView from '@/components/SearchView';
+import AIInsightsCard from '@/components/AIInsightsCard';
 import { useStore } from '@/store/useStore';
-import { BellRing, ArrowRight } from 'lucide-react';
+import { BellRing, ArrowRight, List, Calendar as CalendarIcon } from 'lucide-react';
 
 export default function Home() {
-  const { setKPIs, setWorkOrders } = useStore();
-  const [activeKpi, setActiveKpi] = useState<string | null>(null);
+  const { setKPIs, setWorkOrders, setAssets, activeKpi, setActiveKpi, setSearchQuery, isAuthenticated } = useStore();
+  const [autoPilotMode, setAutoPilotMode] = useState<'schedule' | 'list'>('schedule');
+
+  useEffect(() => {
+    // Reset mode when activeKpi changes
+    if (activeKpi === 'maintenance-auto-pilot') {
+      setAutoPilotMode('schedule');
+    }
+  }, [activeKpi]);
 
   useEffect(() => {
     const fetchKPIs = async () => {
@@ -30,19 +42,32 @@ export default function Home() {
 
     const fetchWorkOrders = async () => {
       try {
-        const res = await fetch('/api/drilldown/work-order');
+        const res = await fetch('/api/work-orders');
         if (res.ok) {
           const data = await res.json();
           console.log("[Stage 4] Work Order Data Fetched Successfully");
-          setWorkOrders(data.data || []);
+          setWorkOrders(data || []);
         }
       } catch (error) {
         console.error('[Stage 4] Error fetching Work Orders:', error);
       }
     };
 
+    const fetchAssets = async () => {
+      try {
+        const res = await fetch('/api/assets');
+        if (res.ok) {
+          const data = await res.json();
+          setAssets(data);
+        }
+      } catch (error) {
+        console.error('Error fetching assets:', error);
+      }
+    };
+
     fetchKPIs();
     fetchWorkOrders();
+    fetchAssets();
 
     const ws = new WebSocket('ws://127.0.0.1:8000/ws/kpis');
     ws.onmessage = (event) => {
@@ -60,12 +85,12 @@ export default function Home() {
   const handleKpiClick = (name: string) => {
     const slug = name.toLowerCase().replace(/ /g, '-').replace(/%/g, '');
     console.log(`[Stage 5] KPI Clicked: ${name} (Slug: ${slug})`);
-    setActiveKpi(prev => prev === slug ? null : slug); // Toggle
-    // Scroll to chart area smoothly
-    setTimeout(() => {
-      document.getElementById('main-content-area')?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+    setActiveKpi(activeKpi === slug ? null : slug); // Toggle
   };
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   return (
     <main className="flex h-screen w-full bg-slate-50 overflow-hidden font-sans relative">
@@ -78,12 +103,12 @@ export default function Home() {
       <div className="flex-1 flex flex-col h-full relative z-10 overflow-hidden">
         <Header />
 
-        <div className="flex-1 overflow-y-auto p-8 space-y-8 scroll-smooth">
+        <div id="scroll-container" className="flex-1 overflow-y-auto p-8 space-y-8 scroll-smooth">
           {/* KPI Section */}
           <section>
             <div className="flex items-end justify-between mb-6 px-2">
               <div>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Plant Performance</h2>
+                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Maintenance Performance</h2>
                 <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">
                   Click any card to drill down • Real-time Metrics
                 </p>
@@ -102,55 +127,88 @@ export default function Home() {
 
           <section id="main-content-area" className="flex flex-col gap-6 px-2 pb-8">
             <div className="w-full">
-              {activeKpi ? (
-                <div className="modular-container p-6 animate-in fade-in zoom-in-95 duration-500">
-                  <DrilldownView kpiId={activeKpi} onClose={() => setActiveKpi(null)} />
-                </div>
-              ) : (
-                <WorkOrderChart />
-              )}
-            </div>
-
-            {/* Insights Widget */}
-            <div className="modular-container flex flex-col relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-bl-full -z-10 transition-transform group-hover:scale-110" />
-
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center">
-                  <BellRing size={20} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Insights</h3>
-                  <p className="text-[10px] text-slate-400 font-bold mt-0.5">AI-Detected Anomalies</p>
-                </div>
+              <div className="space-y-6">
+                <AIInsightsCard />
               </div>
-
-              <div className="flex-1 flex flex-col justify-center">
-                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="px-2.5 py-1 rounded-md bg-rose-100 text-rose-700 text-[9px] font-black uppercase tracking-widest">High Priority</span>
-                    <span className="text-[10px] font-bold text-slate-400">2 mins ago</span>
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-900 mb-2">Asset #A-204 (Compressor)</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                    Anomalous vibration patterns detected matching historical failure profile #7.{' '}
-                    <strong className="text-slate-700">87% probability of breakdown within 48h.</strong>
-                  </p>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => handleKpiClick('Predictive Maintenance %')}
-                className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all hover:gap-3 group-hover:shadow-lg"
-              >
-                Generate Intervention Strategy
-                <ArrowRight size={14} />
-              </button>
             </div>
           </section>
         </div>
       </div>
 
+      {/* Floating KPI Modal */}
+      {activeKpi && !['search', 'assets', 'maintenance-auto-pilot'].includes(activeKpi) && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300"
+          onClick={() => setActiveKpi(null)}
+        >
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" />
+          <div 
+            className="relative w-full max-w-5xl bg-white rounded-[32px] shadow-2xl shadow-slate-900/20 overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-8 duration-500"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
+              <DrilldownView 
+                kpiId={activeKpi === 'pending-work-orders' ? 'work-order' : activeKpi} 
+                initialStatus={activeKpi === 'pending-work-orders' ? 'Pending' : undefined}
+                onClose={() => setActiveKpi(null)} 
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Specialty Full-Screen Views (Scheduler, Search, Assets) */}
+      {(activeKpi === 'maintenance-auto-pilot' || activeKpi === 'search' || activeKpi === 'assets') && (
+        <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col animate-in slide-in-from-right duration-500">
+           <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white">
+                 <button onClick={() => setActiveKpi(null)} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-2">
+                   &larr; Back to Dashboard
+                 </button>
+                 <div className="px-3 py-1 bg-indigo-50 rounded-full text-[9px] font-black text-indigo-600 uppercase tracking-widest">
+                   {activeKpi.replace(/-/g, ' ')}
+                 </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8">
+                {activeKpi === 'maintenance-auto-pilot' ? (
+                   <div className="space-y-6 max-w-7xl mx-auto">
+                      <div className="flex justify-end gap-2 px-2">
+                        <button 
+                          onClick={() => setAutoPilotMode('schedule')}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                            autoPilotMode === 'schedule' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'bg-white text-slate-400 hover:text-slate-600 shadow-sm border border-slate-100'
+                          }`}
+                        >
+                          <CalendarIcon size={14} />
+                          Schedule
+                        </button>
+                        <button 
+                          onClick={() => setAutoPilotMode('list')}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                            autoPilotMode === 'list' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'bg-white text-slate-400 hover:text-slate-600 shadow-sm border border-slate-100'
+                          }`}
+                        >
+                          <List size={14} />
+                          Detailed List
+                        </button>
+                      </div>
+                      <div className="modular-container p-6">
+                        {autoPilotMode === 'schedule' ? <MaintenanceSchedule /> : <DrilldownView kpiId="work-order" initialStatus="Pending" onClose={() => setActiveKpi(null)} />}
+                      </div>
+                   </div>
+                ) : activeKpi === 'search' ? (
+                  <div className="max-w-7xl mx-auto w-full h-full">
+                    <SearchView onClose={() => { setActiveKpi(null); setSearchQuery(''); }} />
+                  </div>
+                ) : (
+                  <div className="max-w-7xl mx-auto w-full h-full">
+                    <AssetView onClose={() => setActiveKpi(null)} />
+                  </div>
+                )}
+              </div>
+           </div>
+        </div>
+      )}
       <ChatPanel />
     </main>
   );

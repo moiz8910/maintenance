@@ -9,23 +9,28 @@ from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from google import genai
 from langgraph.graph import StateGraph, END
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Import our custom engines
 from services.kpi_engine import get_all_kpis
 from services.drilldown_engine import get_drilldown_data, safe_query
 from services.agent_manager import run_maintenance_assistant, run_agent_workflow
+from lookup_router import router as lookup_router
 
 load_dotenv()
 
 class Settings(BaseSettings):
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    model_provider: str = os.getenv("MODEL_PROVIDER", "google")
     db_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "maintenance.db")
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "extra": "allow"}
 
 settings = Settings()
 
 app = FastAPI(title="AI-Powered Maintenance Intelligence Platform")
+app.include_router(lookup_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +75,32 @@ async def get_kpis():
 async def get_drilldown(kpi_id: str):
     # kpi_id comes in slug-format from frontend (e.g. "work-order")
     return get_drilldown_data(kpi_id)
+
+@app.get("/api/assets")
+async def get_assets():
+    return safe_query("""
+        SELECT
+            a.id,
+            a.name,
+            at.type          AS asset_type,
+            a.location,
+            a.criticality,
+            a.throughput_rate,
+            a.throughput_rate_uom,
+            a.mean_time_to_repairmttr_value   AS mttr,
+            a.mean_time_to_repairmttr_uom     AS mttr_uom,
+            a.mean_time_between_failuresmtbf  AS mtbf,
+            a.mean_time_between_failuresmtbf_uom AS mtbf_uom,
+            a.unplanned_downtime,
+            a.unplanned_downtime_uom,
+            a.sop_number,
+            a.sop_description,
+            p.name           AS parent_name
+        FROM asset a
+        LEFT JOIN asset_type at ON a.type = at.id
+        LEFT JOIN asset p ON a.parent_asset = p.id
+        ORDER BY a.id
+    """)
 
 @app.get("/api/work-orders")
 async def get_work_orders(status: Optional[str] = None):
@@ -138,6 +169,7 @@ async def get_execution_plan(work_order_id: str):
     # ── Business Rule: Engineer must be paired with a Technician ──────────────
     engineer_roles = {"engineer", "senior engineer"}
     technician_roles = {"technician", "senior technician"}
+
 
     has_engineer = any(
         (m.get("role_designation") or "").lower() in engineer_roles
@@ -226,13 +258,21 @@ async def get_execution_plan(work_order_id: str):
     """, (work_order_id,))
     
     work_permits = safe_query("""
-        SELECT wp.id, wp.description, wp.type, wp.work_permit_open_day, wp.work_permit_open_time, wp.work_permit_end_day, wp.work_permit_end_time
+        SELECT wp.id, wp.description, wp.type, wp.work_permit_open_day, wp.work_permit_open_time, 
+               wp.work_permit_end_day, wp.work_permit_end_time, wp.status, wp.status_change_timestamp
         FROM work_permit wp
         JOIN work_order_task_item t ON wp.work_order_task_item = t.id
         WHERE t.work_order = ?
     """, (work_order_id,))
     
-    work_order = safe_query("SELECT * FROM work_order WHERE id = ?", (work_order_id,))
+    work_order = safe_query("""
+        SELECT w.*, a.name as asset_name, a.id as asset_id
+        FROM work_order w
+        LEFT JOIN work_order_task_item woti ON woti.work_order = w.id
+        LEFT JOIN asset a ON woti.asset = a.id
+        WHERE w.id = ?
+        LIMIT 1
+    """, (work_order_id,))
     wo_details = work_order[0] if work_order else {}
     
     total_manpower_cost = sum(m.get("service_period", 0) * m.get("standard_hourly_rate", 0) for m in manpower)
@@ -303,6 +343,67 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(10)
     except WebSocketDisconnect:
         pass
+
+@app.get("/api/schedule")
+async def get_schedule():
+    # Current time context provided by user: 2026-05-04 13:07
+    now = datetime(2026, 5, 4, 13, 7)
+    
+    query = """
+        SELECT 
+            w.id as work_order_id,
+            w.repair_description as description,
+            w.work_order_status,
+            wt.id as task_id,
+            wt.work_order_task_item_open_day as date,
+            wt.work_order_task_item_open_time as start_time,
+            wt.work_order_task_item_finish_time as end_time,
+            te.id as technician_id,
+            te.name as technician_name,
+            te.role_designation,
+            (SELECT COUNT(*) FROM work_permit wp JOIN work_order_task_item woti ON wp.work_order_task_item = woti.id WHERE woti.work_order = w.id) as permit_count
+        FROM work_order w
+        JOIN work_order_task_item wt ON w.id = wt.work_order
+        LEFT JOIN technician_engineer_linkage tel ON wt.id = tel.work_order_task_item
+        LEFT JOIN technician_engineer te ON tel.technician_engineer_engaged = te.id
+        ORDER BY wt.work_order_task_item_open_day, wt.work_order_task_item_open_time
+    """
+    results = safe_query(query)
+    
+    schedule = []
+    for row in results:
+        # Date parsing logic
+        db_date = row["date"] or ""
+        if not db_date: continue
+        parts = db_date.split('-')
+        dt_obj = datetime(2000 + int(parts[2]), int(parts[1]), int(parts[0]))
+        
+        # Check if it should be in the scheduler (not more than 2 days in the past)
+        if dt_obj < (now - timedelta(days=2)):
+            continue
+            
+        # Check if it should be closed
+        status = row["work_order_status"]
+        end_time_str = row["end_time"] or "23:59"
+        finish_dt = datetime.combine(dt_obj.date(), datetime.strptime(end_time_str, "%H:%M").time())
+        
+        if finish_dt < now and status.lower() != 'closed':
+            status = 'Closed'
+            safe_query("UPDATE work_order SET work_order_status = 'Closed' WHERE id = ?", (row["work_order_id"],))
+            
+        schedule.append({
+            "id": row["work_order_id"],
+            "title": row["description"],
+            "date": dt_obj.strftime("%Y-%m-%d"),
+            "start": row["start_time"] or "00:00",
+            "end": end_time_str,
+            "technician": row["technician_name"],
+            "technicianId": row["technician_id"],
+            "role": row["role_designation"],
+            "hasPermit": row["permit_count"] > 0,
+            "status": status
+        })
+    return schedule
 
 if __name__ == "__main__":
     import uvicorn

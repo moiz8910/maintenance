@@ -25,10 +25,22 @@ const agents = [
 ];
 
 const Sidebar = () => {
-  const { addChatMessage, setLoading } = useStore();
+  const { addChatMessage, setLoading, setActiveKpi, activeKpi } = useStore();
   const pathname = usePathname();
 
   const handleAgentClick = async (agentId: string, agentName: string) => {
+    if (agentId === 'maintenance_auto_pilot') {
+      setActiveKpi('maintenance-auto-pilot');
+      setTimeout(() => {
+        const container = document.getElementById('scroll-container');
+        const element = document.getElementById('main-content-area');
+        if (container && element) {
+          container.scrollTo({ top: element.offsetTop - 20, behavior: 'smooth' });
+        }
+      }, 100);
+      return;
+    }
+
     console.log(`[Stage 13] Agent Execution Triggered: ${agentName} (${agentId})`);
     setLoading(true);
     addChatMessage({ role: 'user', content: `Start ${agentName}` });
@@ -71,11 +83,21 @@ const Sidebar = () => {
         <div>
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-3 block">Dashboard</label>
           <nav className="space-y-1">
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-50 text-indigo-600 font-bold text-sm">
+            <button
+              onClick={() => setActiveKpi(activeKpi === 'assets' ? null : null)}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors ${
+                activeKpi !== 'assets' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'
+              }`}
+            >
               <LayoutDashboard size={18} />
               Overview
             </button>
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-500 hover:bg-slate-50 font-bold text-sm transition-colors">
+            <button
+              onClick={() => setActiveKpi(activeKpi === 'assets' ? null : 'assets')}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors ${
+                activeKpi === 'assets' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'
+              }`}
+            >
               <Boxes size={18} />
               Assets
             </button>

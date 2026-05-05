@@ -31,9 +31,18 @@ def convert():
         cursor = conn.cursor()
         # Keep only ~15 shifts with overtime, so it's ~7.5% (< 10%)
         cursor.execute("UPDATE technician_engineer_shift SET technician_engineer_overtime = '0' WHERE CAST(id AS INTEGER) > 15")
+        
+        # Rule: Add status columns to work_permit if they don't exist
+        cursor.execute("PRAGMA table_info(work_permit)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if 'status' not in cols:
+            cursor.execute("ALTER TABLE work_permit ADD COLUMN status TEXT DEFAULT 'Unavailable'")
+        if 'status_change_timestamp' not in cols:
+            cursor.execute("ALTER TABLE work_permit ADD COLUMN status_change_timestamp TEXT")
+            
         conn.commit()
     except Exception as e:
-        print("Could not adjust overtime:", e)
+        print("Could not adjust database schema:", e)
     
     print("[Stage 3] Generating KPI table...")
     # Calculate some basic KPIs for the dashboard

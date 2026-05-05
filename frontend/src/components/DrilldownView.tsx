@@ -20,21 +20,29 @@ const COLORS = ['#0f172a', '#6366f1', '#10b981', '#f59e0b', '#ef4444'];
 interface DrilldownViewProps {
   kpiId: string;
   onClose: () => void;
+  initialStatus?: string;
 }
 
-const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
+const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialStatus }) => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [aiInsight, setAiInsight] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [activeView, setActiveView] = useState<'role' | 'discipline'>('role');
-  const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<string | null>(initialStatus || null);
   const [workOrdersData, setWorkOrdersData] = useState<any[]>([]);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | null>(null);
   const [fetchingWo, setFetchingWo] = useState(false);
 
-  const handleBarClick = async (entry: any) => {
-    if (kpiId !== 'work-order') return;
+  // Auto-fetch work orders if initialStatus is provided
+  useEffect(() => {
+    if (initialStatus) {
+      handleBarClick({ name: initialStatus }, true);
+    }
+  }, [initialStatus]);
+
+  const handleBarClick = async (entry: any, bypassKpiCheck = false) => {
+    if (!bypassKpiCheck && kpiId !== 'work-order') return;
     const status = entry.name;
     setSelectedStatus(status);
     setFetchingWo(true);
@@ -78,7 +86,10 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          message: "Explain this data and suggest maintenance improvements.",
+          message: `Analyze the provided chart data specifically for the '${kpiId.replace(/-/g, ' ')}' KPI. Be extremely concise and sharp. Avoid any verbose explanations. Structure your response EXACTLY in three parts:
+1. Internal: 1-2 sharp bullet points on internal chart trends.
+2. External: 1-2 sharp bullet points on global aluminum industry benchmarks for this KPI.
+3. Conclusion: A single concluding sentence.`,
           context_data: contextData 
         })
       });
@@ -100,6 +111,8 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
       </div>
     );
   }
+
+  const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 
   const chartData = kpiId === 'manpower-utilization' && activeView === 'discipline' ? data?.disciplineData : data?.data;
 
@@ -201,13 +214,24 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
                   <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                  <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
-                  <Line type="monotone" dataKey="planned" stroke="#0f172a" strokeWidth={2} dot={{r: 3}}>
-                    <LabelList dataKey="planned" position="top" style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
-                  </Line>
-                  <Line type="monotone" dataKey="actual" stroke="#6366f1" strokeWidth={2} dot={{r: 4}}>
-                    <LabelList dataKey="actual" position="top" style={{ fill: '#6366f1', fontSize: 9, fontWeight: 700 }} />
-                  </Line>
+                  {kpiId !== 'pm-adherence' && <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />}
+                  
+                  {kpiId === 'pm-adherence' ? (
+                    <Line type="monotone" dataKey="adherence" name="Adherence" stroke="#6366f1" strokeWidth={3} dot={{r: 4}}>
+                      <LabelList dataKey="adherence" position="top" style={{ fill: '#6366f1', fontSize: 9, fontWeight: 700 }} />
+                    </Line>
+                  ) : (
+                    <>
+                      {chartData && chartData.length > 0 && 'planned' in chartData[0] && (
+                        <Line type="monotone" dataKey="planned" name="Planned" stroke="#0f172a" strokeWidth={2} dot={{r: 3}}>
+                          <LabelList dataKey="planned" position="top" style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
+                        </Line>
+                      )}
+                      <Line type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} dot={{r: 4}}>
+                        <LabelList dataKey="actual" position="top" style={{ fill: '#6366f1', fontSize: 9, fontWeight: 700 }} />
+                      </Line>
+                    </>
+                  )}
                 </LineChart>
               ) : data?.chartType === 'grouped-bar' ? (
                 <BarChart data={chartData}>
@@ -216,10 +240,10 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
                   <Tooltip cursor={{fill: '#f8fafc'}} />
                   <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
-                  <Bar dataKey={Object.keys(chartData[0] || {})[1]} fill="#0f172a" radius={[4, 4, 0, 0]}>
+                  <Bar dataKey={Object.keys(chartData[0] || {})[1]} name={capitalize(Object.keys(chartData[0] || {})[1] || '')} fill="#0f172a" radius={[4, 4, 0, 0]}>
                     <LabelList dataKey={Object.keys(chartData[0] || {})[1]} position="top" style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
                   </Bar>
-                  <Bar dataKey={Object.keys(chartData[0] || {})[2]} fill="#6366f1" radius={[4, 4, 0, 0]}>
+                  <Bar dataKey={Object.keys(chartData[0] || {})[2]} name={capitalize(Object.keys(chartData[0] || {})[2] || '')} fill="#6366f1" radius={[4, 4, 0, 0]}>
                     <LabelList dataKey={Object.keys(chartData[0] || {})[2]} position="top" style={{ fill: '#6366f1', fontSize: 9, fontWeight: 700 }} />
                   </Bar>
                 </BarChart>
@@ -260,7 +284,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
                   )}
                   <Tooltip cursor={{fill: '#f8fafc'}} />
                   <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
-                  <Bar dataKey={Object.keys(chartData[0] || {})[1] || 'count'} radius={[4, 4, 4, 4]} barSize={24} onClick={handleBarClick}>
+                  <Bar dataKey={Object.keys(chartData[0] || {})[1] || 'count'} name={capitalize(Object.keys(chartData[0] || {})[1] || 'count')} radius={[4, 4, 4, 4]} barSize={24} onClick={handleBarClick}>
                     <LabelList dataKey={Object.keys(chartData[0] || {})[1] || 'count'} position={data?.chartType === 'horizontal-bar' ? "right" : "top"} style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
                     {chartData.map((entry: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} cursor={kpiId === 'work-order' ? 'pointer' : 'default'} />
@@ -273,14 +297,14 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="modular-container border-indigo-100 bg-indigo-50/10 p-5">
+        <div className="flex flex-col gap-6">
+          <div className="w-full modular-container border-indigo-100 bg-indigo-50/10 p-5">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="text-indigo-600" size={16} fill="currentColor" />
               <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">AI Insights</h3>
             </div>
 
-            <div className="text-[10px] font-medium text-slate-700 leading-relaxed bg-white p-4 rounded-xl border border-slate-100 shadow-sm whitespace-pre-line max-h-[300px] overflow-y-auto min-h-[80px]">
+            <div className="text-xs font-medium text-slate-700 leading-relaxed bg-white p-4 rounded-xl border border-slate-100 shadow-sm whitespace-pre-line max-h-[400px] overflow-y-auto min-h-[80px]">
               {aiLoading ? (
                 <div className="flex items-center justify-center h-full w-full py-4">
                   <Loader2 className="animate-spin text-indigo-600" size={16} />
@@ -291,14 +315,14 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose }) => {
             </div>
           </div>
           
-          <div className="modular-container p-5">
+          <div className="w-full modular-container p-5">
              <div className="flex items-center gap-2 mb-4">
               <AlertCircle className="text-amber-500" size={16} />
               <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Quick Actions</h3>
             </div>
             <button className="w-full text-left p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all">
-               <p className="text-[9px] font-black text-slate-900 uppercase tracking-widest">Export Dataset</p>
-               <p className="text-[8px] text-slate-400 font-bold">Download as CSV/JSON</p>
+               <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Export Dataset</p>
+               <p className="text-[10px] text-slate-400 font-bold">Download as CSV/JSON</p>
             </button>
           </div>
         </div>

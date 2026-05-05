@@ -7,3 +7,4 @@ openpyxl
 pydantic-settings
 sqlalchemy
 python-dotenv
+openai

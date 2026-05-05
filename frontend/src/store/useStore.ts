@@ -18,25 +18,41 @@ interface ChatMessage {
 interface MaintenanceStore {
   kpis: KPI[];
   workOrders: any[];
+  assets: any[];
   chatHistory: ChatMessage[];
   isLoading: boolean;
+  activeKpi: string | null;
+  isAuthenticated: boolean;
+  searchQuery: string;
   setKPIs: (kpis: KPI[]) => void;
   setWorkOrders: (orders: any[]) => void;
+  setAssets: (assets: any[]) => void;
   addChatMessage: (message: ChatMessage) => void;
   setLoading: (loading: boolean) => void;
+  setActiveKpi: (kpiId: string | null) => void;
+  setAuthenticated: (auth: boolean) => void;
+  setSearchQuery: (query: string) => void;
 }
 
 export const useStore = create<MaintenanceStore>((set) => ({
   kpis: [],
   workOrders: [],
+  assets: [],
   chatHistory: [
     { role: 'assistant', content: 'Welcome, Maintenance Manager. How can I assist you today?' }
   ],
   isLoading: false,
+  activeKpi: null,
+  isAuthenticated: false,
+  searchQuery: '',
   setKPIs: (kpis) => set({ kpis }),
   setWorkOrders: (workOrders) => set({ workOrders }),
+  setAssets: (assets) => set({ assets }),
   addChatMessage: (message) => set((state) => ({ 
     chatHistory: [...state.chatHistory, message] 
   })),
   setLoading: (loading) => set({ isLoading: loading }),
+  setActiveKpi: (activeKpi) => set({ activeKpi }),
+  setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
 }));

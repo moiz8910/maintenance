@@ -8,7 +8,9 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  Cell
+  Cell,
+  Legend,
+  LabelList
 } from 'recharts';
 import { useStore } from '@/store/useStore';
 import { Filter, MoreHorizontal, Download } from 'lucide-react';
@@ -74,7 +76,9 @@ const WorkOrderChart = () => {
                 fontWeight: 'bold'
               }}
             />
-            <Bar dataKey="count" radius={[12, 12, 0, 0]} barSize={48}>
+            <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
+            <Bar dataKey="count" name="Count" radius={[12, 12, 0, 0]} barSize={48}>
+              <LabelList dataKey="count" position="top" style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
               {data.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
