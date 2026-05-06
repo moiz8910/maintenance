@@ -9,6 +9,14 @@ const AIInsightsCard = () => {
   const [query, setQuery] = useState('');
   const [insight, setInsight] = useState('');
   const [loading, setLoading] = useState(false);
+  const [updates, setUpdates] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    fetch('/api/system-updates')
+      .then(r => r.json())
+      .then(setUpdates)
+      .catch(() => {});
+  }, []);
 
   const handleGenerate = async () => {
     if (!query.trim()) return;
@@ -87,6 +95,28 @@ const AIInsightsCard = () => {
              <div className="prose prose-sm max-w-none text-slate-700 leading-relaxed font-medium">
                <ReactMarkdown remarkPlugins={[remarkGfm]}>{insight}</ReactMarkdown>
              </div>
+          </div>
+        )}
+
+        {/* What's New Section */}
+        {updates.length > 0 && !insight && (
+          <div className="space-y-4 pt-4 border-t border-slate-50">
+            <div className="flex items-center justify-between px-1">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">What's New & Updates</h4>
+              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded-md border border-emerald-100">LIVE</span>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              {updates.map((upd) => (
+                <div key={upd.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 group/item hover:border-indigo-100 hover:bg-white transition-all cursor-default">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-[8px] font-black text-indigo-500 uppercase tracking-widest bg-indigo-50 px-1.5 py-0.5 rounded-md">{upd.category}</span>
+                    <span className="text-[8px] font-bold text-slate-400">{upd.timestamp}</span>
+                  </div>
+                  <h5 className="text-xs font-black text-slate-800 mb-1 group-hover/item:text-indigo-600 transition-colors">{upd.title}</h5>
+                  <p className="text-[10px] text-slate-500 font-medium leading-relaxed">{upd.description}</p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

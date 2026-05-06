@@ -8,13 +8,13 @@ try:
     from .tools import (
         get_kpi_summary, get_work_orders, get_manpower_data, 
         get_cost_analysis, get_downtime_analysis, get_failure_analysis,
-        get_asset_parameters, get_all_assets
+        get_asset_parameters, get_all_assets, get_pending_work_orders_with_tasks
     )
 except ImportError:
     from services.tools import (
         get_kpi_summary, get_work_orders, get_manpower_data, 
         get_cost_analysis, get_downtime_analysis, get_failure_analysis,
-        get_asset_parameters, get_all_assets
+        get_asset_parameters, get_all_assets, get_pending_work_orders_with_tasks
     )
 
 # Define State
@@ -45,7 +45,7 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 google_client = genai.Client(api_key=google_api_key) if google_api_key else None
 openai_client = openai.OpenAI(api_key=openai_api_key) if openai_api_key else None
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-flash-latest"
 OPENAI_MODEL = "gpt-4o"
 
 def generate_with_retry(prompt, system_prompt=None, max_retries=3):
@@ -141,6 +141,10 @@ def fetch_data(state: AgentState):
         data['kpis'] = get_kpi_summary()
     if "WORK_ORDER" in intent:
         data['work_orders'] = get_work_orders()
+    
+    # Special: Detailed task instructions fetch
+    if "instruction" in state['query'].lower() or "coach" in state['query'].lower():
+        data['pending_work_orders_detailed'] = get_pending_work_orders_with_tasks()
     if "MANPOWER" in intent:
         data['manpower'] = get_manpower_data()
     if "COST" in intent:
@@ -167,6 +171,7 @@ def fetch_data(state: AgentState):
     
     # Debug log for data counts
     summary = ", ".join([f"{k}: {len(v) if isinstance(v, list) else 1 if v else 0}" for k, v in data.items()])
+    print(f"[Agent Manager] Stage 3 complete. Data summary: {summary}")
     state['stage_logs'].append(f"[Stage 3.1] Data retrieved: {summary}")
     
     return state
@@ -206,12 +211,18 @@ def validate_and_generate(state: AgentState):
     
     user_prompt = f"Question: {state['query']}\n\nContext Data:\n{context}"
     
-    response_text = generate_with_retry(
-        prompt=user_prompt,
-        system_prompt=system_prompt
-    )
+    try:
+        response_text = generate_with_retry(
+            prompt=user_prompt,
+            system_prompt=system_prompt
+        )
+        state['answer'] = response_text
+    except Exception as e:
+        print(f"[Agent Manager] ERROR in generation: {e}")
+        state['answer'] = f"The AI agent encountered an error during response generation: {str(e)}"
+        state['confidence'] = "low"
+        return state
     
-    state['answer'] = response_text
     state['data_used'] = state['tools_data']
     state['confidence'] = "high" if state['tools_data'] else "low"
     
@@ -258,7 +269,7 @@ def run_agent_workflow(agent_id: str, query: str = ""):
         "maintenance_auto_pilot": "Analyze all plant KPIs and generate an immediate maintenance execution strategy.",
         "asset_strategy": "Review asset health and propose a long-term maintenance schedule optimization.",
         "business_analyst": "Provide a detailed business intelligence report on current plant performance and cost variance.",
-        "work_instruction_coach": "Review pending work orders and generate SOP/instruction summaries for critical tasks.",
+        "work_instruction_coach": "List all pending work orders. For each work order, provide detailed work instructions for EVERY task item, including safety steps and necessary tools.",
         "reliability_assistant": "Analyze downtime and failure incidents to suggest reliability improvements.",
         "asset_steward": "Provide a complete overview of asset lifecycle status and maintenance history."
     }

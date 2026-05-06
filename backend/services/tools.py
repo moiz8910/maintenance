@@ -38,6 +38,17 @@ def get_work_orders(status=None):
         return safe_query("SELECT * FROM work_order WHERE LOWER(work_order_status) = ?", (status.lower(),))
     return safe_query("SELECT * FROM work_order LIMIT 20")
 
+def get_pending_work_orders_with_tasks():
+    """Fetches all pending work orders and their associated task items."""
+    return safe_query("""
+        SELECT w.id as wo_id, w.repair_description, w.work_order_class,
+               ti.id as task_item_id, ti.task as task_id, t.description as task_description, t.discipline
+        FROM work_order w
+        JOIN work_order_task_item ti ON w.id = ti.work_order
+        JOIN task t ON ti.task = t.id
+        WHERE LOWER(w.work_order_status) = 'pending'
+    """)
+
 # 3. Manpower Data
 def get_manpower_data():
     """Fetches technician and engineer utilization data."""

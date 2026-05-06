@@ -8,3 +8,5 @@ pydantic-settings
 sqlalchemy
 python-dotenv
 openai
+python-docx
+

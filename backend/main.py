@@ -1,9 +1,11 @@
 import os
+import io
 import json
 import asyncio
 import sqlite3
 from typing import List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
@@ -266,6 +268,85 @@ Return ONLY valid JSON with exactly these keys:
         "materials": materials,
         "ai_document": ai_data
     }
+
+@app.post("/api/work-permit/{permit_id}/download-docx")
+async def download_permit_docx(permit_id: str, data: dict):
+    """Convert provided permit JSON data into a Word document."""
+    import io
+    from docx import Document as DocxDocument
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    ai_data = data.get("ai_document", {})
+    permit = data.get("permit", {})
+    manpower = data.get("manpower", [])
+
+    doc = DocxDocument()
+    
+    # Title
+    title = doc.add_heading("VEDANTA JHARSUGUDA — WORK PERMIT", level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    sub = doc.add_paragraph(f"{ai_data.get('permit_type_full', permit.get('type', ''))} PERMIT  |  {permit_id}")
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    doc.add_paragraph(f"Issued: {permit.get('work_permit_open_day','')} {permit.get('work_permit_open_time','')}   |   Expires: {permit.get('work_permit_end_day','')} {permit.get('work_permit_end_time','')}   |   Risk: {ai_data.get('risk_level','')}")
+    doc.add_paragraph()
+
+    def add_section(heading, content):
+        doc.add_heading(heading, level=2)
+        if isinstance(content, list):
+            for item in content:
+                doc.add_paragraph(f"• {item}", style="List Bullet")
+        else:
+            doc.add_paragraph(str(content))
+
+    sections = [
+        ("Work Scope", "work_scope"),
+        ("Location Details", "location_details"),
+        ("Risk Justification", "risk_justification"),
+        ("Hazard Identification", "hazard_identification"),
+        ("Safety Controls", "safety_controls"),
+        ("PPE Requirements", "ppe_requirements"),
+        ("Isolation / LOTO Requirements", "isolation_requirements"),
+        ("Environmental Controls", "environmental_controls"),
+        ("Emergency Procedure", "emergency_procedure"),
+        ("Special Instructions", "special_instructions"),
+        ("Authorization Conditions", "authorization_conditions"),
+        ("Competency Requirements", "competency_requirements")
+    ]
+
+    for title_text, key in sections:
+        add_section(title_text, ai_data.get(key, ""))
+
+    # Personnel table
+    doc.add_heading("Assigned Personnel", level=2)
+    if manpower:
+        tbl = doc.add_table(rows=1, cols=4)
+        tbl.style = "Table Grid"
+        hdr = tbl.rows[0].cells
+        hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text = "Name", "Role", "Discipline", "Hours"
+        for m in manpower:
+            row = tbl.add_row().cells
+            row[0].text = m.get("name","")
+            row[1].text = m.get("role_designation","")
+            row[2].text = m.get("discipline_trade","")
+            row[3].text = str(m.get("technician_service_period",""))
+
+    doc.add_paragraph()
+    doc.add_heading("Signatures", level=2)
+    for role in ["Permit Issuer", "Permit Receiver", "Safety Officer", "Area Manager"]:
+        doc.add_paragraph(f"{role}: ___________________________    Date: ____________")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename=\"WorkPermit_{permit_id}.docx\""}
+    )
 
 @app.get("/api/execution-plan/{work_order_id}")
 
@@ -550,12 +631,16 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
 
 @app.get("/api/schedule")
-async def get_schedule():
-    # Current time context provided by user: 2026-05-04 13:07
-    now = datetime(2026, 5, 4, 13, 7)
-    
-    query = """
-        SELECT 
+async def get_schedule(status: Optional[str] = None):
+    now = datetime.now()
+
+    # Build status filter for SQL
+    status_filter = ""
+    if status:
+        status_filter = f"AND LOWER(w.work_order_status) = '{status.lower()}'"
+
+    query = f"""
+        SELECT
             w.id as work_order_id,
             w.repair_description as description,
             w.work_order_status,
@@ -566,42 +651,39 @@ async def get_schedule():
             te.id as technician_id,
             te.name as technician_name,
             te.role_designation,
-            (SELECT COUNT(*) FROM work_permit wp JOIN work_order_task_item woti ON wp.work_order_task_item = woti.id WHERE woti.work_order = w.id) as permit_count
+            (SELECT COUNT(*) FROM work_permit wp
+             JOIN work_order_task_item woti ON wp.work_order_task_item = woti.id
+             WHERE woti.work_order = w.id) as permit_count
         FROM work_order w
         JOIN work_order_task_item wt ON w.id = wt.work_order
         LEFT JOIN technician_engineer_linkage tel ON wt.id = tel.work_order_task_item
         LEFT JOIN technician_engineer te ON tel.technician_engineer_engaged = te.id
+        WHERE 1=1 {status_filter}
         ORDER BY wt.work_order_task_item_open_day, wt.work_order_task_item_open_time
     """
     results = safe_query(query)
-    
+
     schedule = []
+    seen_wo_ids = set()   # deduplicate — one calendar entry per WO
+
     for row in results:
-        # Date parsing logic
-        db_date = row["date"] or ""
-        if not db_date: continue
-        parts = db_date.split('-')
-        dt_obj = datetime(2000 + int(parts[2]), int(parts[1]), int(parts[0]))
-        
-        # Check if it should be in the scheduler (not more than 2 days in the past)
-        if dt_obj < (now - timedelta(days=2)):
+        wo_id = row["work_order_id"]
+        if wo_id in seen_wo_ids:
             continue
-            
-        # Check if it should be closed (don't override approved/in-progress WOs)
-        status = row["work_order_status"]
+
+        db_date = row["date"] or ""
+        if not db_date:
+            continue
+
+        try:
+            parts = db_date.split('-')
+            dt_obj = datetime(2000 + int(parts[2]), int(parts[1]), int(parts[0]))
+        except Exception:
+            continue
+
+        seen_wo_ids.add(wo_id)
+        item_status = row["work_order_status"] or "Pending"
         end_time_str = row["end_time"] or "23:59"
-        finish_dt = datetime.combine(dt_obj.date(), datetime.strptime(end_time_str, "%H:%M").time())
-        
-        if finish_dt < now and status.lower() not in ('closed', 'in-progress'):
-            status = 'Closed'
-            safe_query("UPDATE work_order SET work_order_status = 'Closed' WHERE id = ?", (row["work_order_id"],))
-            # Close logic: all permits for this WO must be set to Available on closure
-            safe_query("""
-                UPDATE work_permit SET status = 'Available'
-                WHERE work_order_task_item IN (
-                    SELECT id FROM work_order_task_item WHERE work_order = ?
-                )
-            """, (row["work_order_id"],))
             
         schedule.append({
             "id": row["work_order_id"],
@@ -616,6 +698,106 @@ async def get_schedule():
             "status": status
         })
     return schedule
+
+@app.get("/api/system-updates")
+async def get_system_updates():
+    """Return a list of recent platform improvements and new features."""
+    return [
+        {
+            "id": "word-permits",
+            "title": "Interactive Word Permits",
+            "description": "Permits now open in a premium preview pop-up with a dedicated 'Download as Word' export option.",
+            "category": "New Feature",
+            "timestamp": "Today"
+        },
+        {
+            "id": "pending-rule",
+            "title": "20% Pending Volume Floor",
+            "description": "System now automatically maintains at least 20% work order volume in 'Pending' status to ensure a healthy maintenance pipeline.",
+            "category": "System Rule",
+            "timestamp": "Today"
+        },
+        {
+            "id": "scheduling-integrity",
+            "title": "Dual-Date Scheduling",
+            "description": "Work order open dates are now backdated (Today-2/3) while task items are scheduled forward with a 4 WO/day capacity cap.",
+            "category": "Integrity",
+            "timestamp": "Yesterday"
+        }
+    ]
+
+@app.post("/api/material-reservation/generate")
+async def generate_material_reservation(data: dict):
+    """Generate an AI-powered Material Reservation (MR) document."""
+    import openai as _openai
+    import json as _json
+
+    _api_key = os.getenv("OPENAI_API_KEY", "")
+    _openai_client = _openai.OpenAI(api_key=_api_key)
+
+    material = data.get("material", "Unknown Material")
+    qty = data.get("quantity", 0)
+    wo_id = data.get("work_order_id", "N/A")
+    asset_id = data.get("asset_id", "N/A")
+    asset_name = data.get("asset_name", "N/A")
+
+    # 1. Calculate Reservation Period (Start: First task start, End: Start + 2 days)
+    _res = safe_query("""
+        SELECT work_order_task_item_open_day as day,
+               work_order_task_item_open_time as time
+        FROM work_order_task_item
+        WHERE work_order = ?
+        ORDER BY work_order_task_item_open_day ASC,
+                 work_order_task_item_open_time ASC
+        LIMIT 1
+    """, (wo_id,))
+    
+    start_date_str = "N/A"
+    end_date_str = "N/A"
+    if _res:
+        _d_str = _res[0].get("day", "")
+        _t_str = _res[0].get("time", "08:00")
+        try:
+            # Parse DD-MM-YY
+            _d, _m, _y = _d_str.strip().split('-')
+            start_dt = datetime(2000 + int(_y), int(_m), int(_d))
+            end_dt = start_dt + timedelta(days=2)
+            start_date_str = f"{start_dt.strftime('%d-%m-%y')} {_t_str}"
+            end_date_str = f"{end_dt.strftime('%d-%m-%y')} 17:00"
+        except Exception as e:
+            print(f"Error parsing date for MR: {e}")
+
+    system_prompt = f"""You are a materials manager at the Vedanta Jharsuguda Aluminum Plant.
+    Generate a professional Material Reservation (MR) document.
+    
+    Return ONLY valid JSON with these keys:
+    {{
+      "mr_number": "MR-{wo_id[-4:]}-2026",
+      "reservation_type": "Maintenance/Emergency",
+      "material_specifications": "Detailed technical specs for {material} in the context of {asset_name} ({asset_id}) at Vedanta Jharsuguda",
+      "storage_conditions": "Specific storage instructions for a tropical smelter environment",
+      "handling_instructions": "Safety and handling for this specific item in a smelter",
+      "criticality_impact": "Operational impact if this material is delayed for Work Order {wo_id} on {asset_id}",
+      "warehouse_instructions": "Specific instructions for Vedanta's warehouse personnel",
+      "validity_period": "{start_date_str} to {end_date_str}",
+      "terms": "Standard Vedanta Jharsuguda material handling terms"
+    }}"""
+
+    prompt = f"Create a Material Reservation for {qty} units of '{material}' for Work Order {wo_id} (Asset: {asset_id} - {asset_name}). Period: {start_date_str} to {end_date_str}."
+
+    try:
+        response = _openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        ai_data = _json.loads(response.choices[0].message.content)
+        return ai_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

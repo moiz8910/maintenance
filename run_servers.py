@@ -19,7 +19,12 @@ print("Dependencies installed successfully!\n")
 
 def stream_output(pipe, prefix):
     for line in iter(pipe.readline, b''):
-        print(f"[{prefix}] {line.decode('utf-8', errors='replace')}", end='', flush=True)
+        try:
+            print(f"[{prefix}] {line.decode('utf-8', errors='replace')}", end='', flush=True)
+        except UnicodeEncodeError:
+            # Fallback for Windows console encoding issues
+            clean_line = line.decode('utf-8', errors='replace').encode('ascii', 'backslashreplace').decode('ascii')
+            print(f"[{prefix}] {clean_line}", end='', flush=True)
 
 print("Starting backend server...")
 backend = subprocess.Popen([sys.executable, BACKEND_PATH], cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

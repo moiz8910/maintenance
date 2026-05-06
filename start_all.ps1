@@ -23,6 +23,15 @@ python "$ROOT\backend\excel_to_sqlite.py"
 Write-Host "Running schedule_pending_wos.py..."
 python "$ROOT\schedule_pending_wos.py"
 
+Write-Host "Running dedup_work_orders.py..."
+python "$ROOT\dedup_work_orders.py"
+
+Write-Host "Running fix_id_duplicates.py..."
+python "$ROOT\fix_id_duplicates.py"
+
+Write-Host "Running update_all_dates.py..."
+python "$ROOT\update_all_dates.py"
+
 Write-Host "Running assign_permits.py..."
 python "$ROOT\assign_permits.py"
 
@@ -31,6 +40,9 @@ python "$ROOT\fix_resource_disciplines.py"
 
 Write-Host "Running apply_closure_rules.py..."
 python "$ROOT\apply_closure_rules.py"
+
+Write-Host "Running ensure_pending_pct.py (min 20% pending)..."
+python "$ROOT\ensure_pending_pct.py"
 
 Write-Host "Starting Backend Server in a new window..."
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ROOT'; python backend/main.py"

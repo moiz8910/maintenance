@@ -13,7 +13,7 @@ import random
 from datetime import datetime, timedelta
 
 DB_PATH = "backend/maintenance.db"
-NOW = datetime(2026, 5, 5, 6, 0, 0)   # fixed reference time per conversation context
+NOW = datetime.now()   # always evaluate against real current time
 
 def parse_dt(day_str, time_str):
     """Parse 'DD-MM-YY' date and 'HH:MM' time into a datetime."""

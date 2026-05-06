@@ -50,7 +50,8 @@ def assign_permits():
         if wo_status == "closed":
             p_status = "Available"
         else:
-            p_status = random.choice(["Available", "Unavailable"])
+            # 75% chance of being Available to meet the "at least 70%" requirement
+            p_status = "Available" if random.random() < 0.75 else "Unavailable"
         
         # Rule: Time stamp should be within 1 hour of work order open time stamp.
         status_ts = None

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { Loader2, X, Briefcase, Users, Box, CheckCircle2, ShieldCheck, Calculator, Trash2, Plus, Edit3, FileText } from 'lucide-react';
+import { Loader2, X, Briefcase, Users, Box, CheckCircle2, ShieldCheck, Calculator, Trash2, Plus, Edit3, FileText, Mail, BookOpen } from 'lucide-react';
 
 interface ExecutionPlanModalProps {
   workOrderId: string;
@@ -15,6 +15,13 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
   const [approved, setApproved] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [generatingPermit, setGeneratingPermit] = useState<string | null>(null);
+  const [previewPermit, setPreviewPermit] = useState<any>(null);
+  const [downloadingDocx, setDownloadingDocx] = useState(false);
+  const [generatingMR, setGeneratingMR] = useState<string | null>(null);
+  const [generatingPR, setGeneratingPR] = useState<string | null>(null);
+  const [mrPreview, setMrPreview] = useState<any>(null);
+  const [coachResponse, setCoachResponse] = useState<string | null>(null);
+  const [coaching, setCoaching] = useState(false);
 
   // Editable copies
   const [editTasks, setEditTasks] = useState<any[]>([]);
@@ -83,26 +90,110 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
     }
   };
 
+  const handleGeneratePermit = async (permitId: string, start?: string, end?: string) => {
+    setGeneratingPermit(permitId);
+    try {
+      const res = await fetch(`/api/work-permit/${permitId}/generate`, { method: 'POST' });
+      if (!res.ok) throw new Error('Generation failed');
+      const json = await res.json();
+      setPreviewPermit(json);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to generate permit');
+    } finally {
+      setGeneratingPermit(null);
+    }
+  };
+
+  const handleDownloadDocx = async () => {
+    if (!previewPermit) return;
+    setDownloadingDocx(true);
+    try {
+      const res = await fetch(`/api/work-permit/${previewPermit.permit.id}/download-docx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previewPermit)
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${previewPermit.permit.id}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDownloadingDocx(false);
+    }
+  };
+
   const enterReview = () => {
     setReviewMode(true);
     fetchLookups();
   };
 
-  const handleGeneratePermit = async (permitId: string, startStr: string, endStr: string) => {
-    setGeneratingPermit(permitId);
+  const handleGenerateMR = async (mat: any) => {
+    setGeneratingMR(mat.material);
     try {
-      const res = await fetch(`/api/work-permit/${permitId}/generate`, { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || 'Unknown error');
-      }
+      const res = await fetch(`/api/material-reservation/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          material: mat.material,
+          quantity: mat.recommended_quantity,
+          work_order_id: workOrderId,
+          asset_id: data?.work_order?.asset_id,
+          asset_name: data?.work_order?.asset_name
+        })
+      });
+      if (!res.ok) throw new Error('MR Generation failed');
       const json = await res.json();
-      openPermitPDF(json, startStr, endStr);
+      setMrPreview(json);
     } catch (e: any) {
-      console.error('Permit generation error:', e);
-      alert(`Permit generation failed:\n${e.message}`);
+      console.error(e);
+      alert('MR Generation failed');
     } finally {
-      setGeneratingPermit(null);
+      setGeneratingMR(null);
+    }
+  };
+
+  const handleDownloadMR = async () => {
+    if (!mrPreview) return;
+    setDownloadingDocx(true);
+    try {
+      // Reuse the docx download logic, backend can handle general JSON-to-Docx
+      const res = await fetch(`/api/work-permit/${mrPreview.mr_number}/download-docx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          permit: { id: mrPreview.mr_number, type: 'MATERIAL RESERVATION' },
+          ai_document: mrPreview
+        })
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${mrPreview.mr_number}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      setDownloadingDocx(false);
+    }
+  };
+
+  const handleGeneratePR = async (mat: any) => {
+    setGeneratingPR(mat.material);
+    try {
+      // For now, simulate PR creation with an alert
+      // In a real app, this would call /api/purchase-requisition/generate
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      alert(`Purchase Requisition (PR) has been successfully created for:\n${mat.material}\n\nOur procurement team will be notified.`);
+    } finally {
+      setGeneratingPR(null);
     }
   };
 
@@ -360,10 +451,33 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
                 );
               })()}
               <h2 className="text-2xl font-black text-slate-900">{workOrderId}</h2>
+              <button
+                onClick={async () => {
+                  setCoaching(true);
+                  try {
+                    const res = await fetch(`/api/agent/work_instruction_coach`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ message: `Provide specific instructions for Work Order ${workOrderId} on asset ${data.work_order.asset_name}.` })
+                    });
+                    const result = await res.json();
+                    setCoachResponse(result.answer);
+                  } catch (e) {
+                    alert('Coach unavailable');
+                  } finally {
+                    setCoaching(false);
+                  }
+                }}
+                disabled={coaching}
+                className="ml-2 flex items-center gap-2 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black transition-all shadow-md shadow-indigo-100 disabled:opacity-50"
+              >
+                {coaching ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
+                AI COACH
+              </button>
             </div>
             <div className="flex items-center gap-2 mb-1">
               <span className="px-2 py-0.5 bg-slate-800 text-slate-200 text-[10px] font-black uppercase tracking-widest rounded-md">Asset</span>
-              {data.work_order?.asset_id ? (
+              {data.work_order.asset_id ? (
                 <>
                   <span className="text-sm font-black text-slate-700">{data.work_order.asset_id}</span>
                   <span className="text-slate-400 text-sm">—</span>
@@ -372,12 +486,6 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
               ) : <span className="text-sm text-slate-400 italic">Not Assigned</span>}
             </div>
             <p className="text-sm text-slate-500 font-medium mt-1 max-w-2xl">{data.work_order?.repair_description}</p>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
-              {data.work_order?.repair_type} &bull; Opened: {data.work_order?.work_order_open_day} {data.work_order?.work_order_open_time}
-              {data.work_order?.work_order_end_day && (
-                <span className="ml-3 text-rose-500 font-black">&bull; Closed: {data.work_order.work_order_end_day} {data.work_order.work_order_end_time}</span>
-              )}
-            </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400 hover:text-slate-700 shrink-0">
             <X size={24} />
@@ -389,6 +497,21 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
           <div className="border-2 border-indigo-100 bg-white rounded-2xl p-6 space-y-6 shadow-sm">
 
             {reviewBanner}
+
+            {coachResponse && (
+              <div className="bg-indigo-50 border-2 border-indigo-200 rounded-2xl p-6 relative animate-in slide-in-from-top-4 duration-500">
+                <button onClick={() => setCoachResponse(null)} className="absolute top-4 right-4 text-indigo-400 hover:text-indigo-600"><X size={18} /></button>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-lg"><BookOpen size={16} /></div>
+                  <h4 className="text-sm font-black text-indigo-900 uppercase tracking-widest">Coached Instructions — {workOrderId}</h4>
+                </div>
+                <div className="prose prose-sm prose-indigo max-w-none">
+                  <div className="text-xs text-indigo-800 leading-relaxed space-y-2 whitespace-pre-wrap">
+                    {coachResponse}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Task Items */}
             <div className="w-full">
@@ -527,26 +650,51 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
                   <span className="ml-auto text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{editMaterials.length}</span>
                 </div>
                 <div className="space-y-3">
-                  {editMaterials.map((mat: any, idx: number) => (
-                    <div key={idx} className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 flex flex-col gap-2">
-                      <p className="text-xs font-bold text-slate-700 truncate" title={mat.material}>{mat.material}</p>
-                      <div className="flex justify-between items-center text-[10px]">
-                        <span className="text-slate-500">Available: <strong className="text-slate-800">{mat.available_quantity || 0}</strong></span>
-                        {reviewMode ? (
-                          <div className="flex items-center gap-1">
-                            <input type="number" min={1} className="w-14 text-xs border border-amber-200 rounded px-1 py-0.5 bg-amber-50 text-center focus:outline-none"
-                              value={mat.recommended_quantity}
-                              onChange={e => { const c = [...editMaterials]; c[idx] = { ...c[idx], recommended_quantity: Number(e.target.value) }; setEditMaterials(c); }} />
-                            <button onClick={() => setEditMaterials(prev => prev.filter((_, i) => i !== idx))} className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors">
-                              <Trash2 size={12} />
+                  {editMaterials.map((mat: any, idx: number) => {
+                    const hasStock = (mat.available_quantity || 0) >= (mat.recommended_quantity || 0);
+                    return (
+                      <div key={idx} className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 flex flex-col gap-2">
+                        <div className="flex justify-between items-start">
+                          <p className="text-xs font-bold text-slate-700 truncate flex-1" title={mat.material}>{mat.material}</p>
+                          {hasStock && !reviewMode && (
+                            <button
+                              onClick={() => handleGenerateMR(mat)}
+                              disabled={generatingMR === mat.material}
+                              className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-700 text-[8px] font-black rounded-md border border-amber-200 transition-colors flex items-center gap-1 shrink-0 ml-2"
+                            >
+                              {generatingMR === mat.material ? <Loader2 size={8} className="animate-spin" /> : <Box size={8} />}
+                              MATERIAL MR
                             </button>
-                          </div>
-                        ) : (
-                          <span className="text-slate-500">Recommended: <strong className="text-amber-600">{mat.recommended_quantity || 0}</strong></span>
-                        )}
+                          )}
+                          {!hasStock && !reviewMode && (
+                            <button
+                              onClick={() => handleGeneratePR(mat)}
+                              disabled={generatingPR === mat.material}
+                              className="px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-700 text-[8px] font-black rounded-md border border-rose-200 transition-colors flex items-center gap-1 shrink-0 ml-2"
+                            >
+                              {generatingPR === mat.material ? <Loader2 size={8} className="animate-spin" /> : <Calculator size={8} />}
+                              CREATE PR
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-500">Available: <strong className="text-slate-800">{mat.available_quantity || 0}</strong></span>
+                          {reviewMode ? (
+                            <div className="flex items-center gap-1">
+                              <input type="number" min={1} className="w-14 text-xs border border-amber-200 rounded px-1 py-0.5 bg-amber-50 text-center focus:outline-none"
+                                value={mat.recommended_quantity}
+                                onChange={e => { const c = [...editMaterials]; c[idx] = { ...c[idx], recommended_quantity: Number(e.target.value) }; setEditMaterials(c); }} />
+                              <button onClick={() => setEditMaterials(prev => prev.filter((_, i) => i !== idx))} className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors">
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">Required: <strong className={hasStock ? 'text-emerald-600' : 'text-rose-600'}>{mat.recommended_quantity || 0}</strong></span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {reviewMode && (
                     <div className="pt-2 border-t border-dashed border-amber-200 space-y-2">
                       {lookupLoading ? <Loader2 className="animate-spin text-amber-500" size={16} /> : (
@@ -647,13 +795,13 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
                         <button
                           onClick={() => handleGeneratePermit(wp.id, permitStart, permitEnd)}
                           disabled={generatingPermit === wp.id}
-                          className="flex items-center gap-1 px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[9px] font-black rounded-md transition-colors disabled:opacity-50 disabled:cursor-wait"
-                          title="Click to generate AI-powered PDF permit"
+                          className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[9px] font-black rounded-md transition-colors disabled:opacity-50 disabled:cursor-wait border border-blue-200"
+                          title="Click to download AI-generated Word permit"
                         >
                           {generatingPermit === wp.id ? (
                             <Loader2 size={9} className="animate-spin" />
                           ) : (
-                            <FileText size={9} />
+                            <span className="text-[10px] font-black leading-none">W</span>
                           )}
                           {wp.id}
                         </button>
@@ -743,6 +891,180 @@ const ModalContent: React.FC<{ workOrderId: string; onClose: () => void }> = ({ 
           </div>
         </div>
       </div>
+      {/* Permit Preview Pop-up */}
+      {previewPermit && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col scale-in-center">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 text-white font-black text-xl">W</div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 leading-tight">Work Permit Preview</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{previewPermit.permit.id} • {previewPermit.ai_document.permit_type_full}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleDownloadDocx}
+                  disabled={downloadingDocx}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
+                >
+                  {downloadingDocx ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                  Download Word Document
+                </button>
+                <button 
+                  onClick={() => setPreviewPermit(null)}
+                  className="p-2.5 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-900"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Content Preview */}
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-8 bg-white">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Risk Level</div>
+                  <div className={`px-3 py-1 rounded-full text-[10px] font-black w-fit ${
+                    previewPermit.ai_document.risk_level === 'HIGH' ? 'bg-rose-100 text-rose-700' : 
+                    previewPermit.ai_document.risk_level === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                  }`}>
+                    {previewPermit.ai_document.risk_level} RISK
+                  </div>
+                </div>
+                <div className="text-right space-y-1">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Scheduled Window</div>
+                  <div className="text-xs font-bold text-slate-900">
+                    {previewPermit.permit.work_permit_open_day} {previewPermit.permit.work_permit_open_time} → {previewPermit.permit.work_permit_end_day} {previewPermit.permit.work_permit_end_time}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-2">
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-500 pl-3">Work Scope</h4>
+                  <p className="text-xs leading-relaxed text-slate-600 font-medium">{previewPermit.ai_document.work_scope}</p>
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-500 pl-3">Location Details</h4>
+                  <p className="text-xs leading-relaxed text-slate-600 font-medium">{previewPermit.ai_document.location_details}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-500 pl-3">Hazard Identification</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {previewPermit.ai_document.hazard_identification.map((h: string, i: number) => (
+                    <div key={i} className="flex items-start gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                      <div className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
+                      <span className="text-[11px] font-bold text-slate-700">{h}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-500 pl-3">Safety Controls</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {previewPermit.ai_document.safety_controls.map((s: string, i: number) => (
+                    <div key={i} className="flex items-start gap-2 bg-indigo-50/30 p-3 rounded-xl border border-indigo-100/50">
+                      <ShieldCheck size={14} className="text-indigo-600 shrink-0 mt-0.5" />
+                      <span className="text-[11px] font-bold text-slate-700">{s}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Material Reservation Preview */}
+      {mrPreview && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col scale-in-center">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-200 text-white font-black text-xl">M</div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 leading-tight">Material Reservation</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {mrPreview.mr_number} • WO: {workOrderId} • Asset: {data.work_order.asset_id} ({data.work_order.asset_name})
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleDownloadMR}
+                    disabled={downloadingDocx}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-amber-100 disabled:opacity-50"
+                  >
+                    {downloadingDocx ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                    Download Word Document
+                  </button>
+                  <button
+                    onClick={() => {
+                      const subject = encodeURIComponent(`Material Reservation: ${mrPreview.mr_number}`);
+                      const body = encodeURIComponent(`Material Reservation Details:\n\nMR Number: ${mrPreview.mr_number}\nType: ${mrPreview.reservation_type}\nValidity: ${mrPreview.validity_period}\n\nTechnical Specifications:\n${mrPreview.material_specifications}`);
+                      window.location.href = `mailto:?subject=${subject}&body=${body}`;
+                    }}
+                    className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black transition-all shadow-lg shadow-blue-100"
+                  >
+                    <Mail size={12} />
+                    Email-Material Reservation
+                  </button>
+                </div>
+                <button 
+                  onClick={() => setMrPreview(null)}
+                  className="p-2.5 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-900"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Editable Content */}
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-6 bg-white">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Reservation Type</label>
+                  <input className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-900"
+                    value={mrPreview.reservation_type}
+                    onChange={e => setMrPreview({...mrPreview, reservation_type: e.target.value})} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Validity Period</label>
+                  <input className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-900"
+                    value={mrPreview.validity_period}
+                    onChange={e => setMrPreview({...mrPreview, validity_period: e.target.value})} />
+                </div>
+              </div>
+
+              {[
+                { label: 'Material Specifications', key: 'material_specifications' },
+                { label: 'Storage Conditions', key: 'storage_conditions' },
+                { label: 'Handling Instructions', key: 'handling_instructions' },
+                { label: 'Criticality Impact', key: 'criticality_impact' },
+                { label: 'Warehouse Instructions', key: 'warehouse_instructions' }
+              ].map(sec => (
+                <div key={sec.key} className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{sec.label}</label>
+                  <textarea 
+                    rows={2}
+                    className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-200 transition-all"
+                    value={mrPreview[sec.key]}
+                    onChange={e => setMrPreview({...mrPreview, [sec.key]: e.target.value})}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
