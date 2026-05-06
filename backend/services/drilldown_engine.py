@@ -14,6 +14,7 @@ def safe_query(query, params=()):
         cursor = conn.cursor()
         cursor.execute(query, params)
         res = [dict(row) for row in cursor.fetchall()]
+        conn.commit()   # persist UPDATEs / INSERTs / DELETEs
         conn.close()
         return res
     except Exception as e:
@@ -168,23 +169,9 @@ def get_drilldown_data(kpi_id: str):
             "title": "Predictive Maintenance Adoption"
         }
         
-    elif kpi_id == "safety-statistics":
-        conn = get_conn()
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(incident_events)")
-        cols = [r[1] for r in cursor.fetchall()]
-        
-        type_col = "incident_type"
-        for c in ['incident_type', 'type', 'event_type', 'incident_category', 'category', 'incident_class']:
-            if c in cols:
-                type_col = c
-                break
-        if type_col not in cols and cols:
-            type_col = cols[1] if len(cols) > 1 else cols[0]
-            
-        conn.close()
-        data = safe_query(f"SELECT {type_col} as name, COUNT(*) as count FROM incident_events GROUP BY {type_col}")
-        return {"chartType": "bar", "data": data, "title": "Incident Types Distribution"}
+    elif kpi_id == "safety-compliance":
+        data = safe_query("SELECT type as name, COUNT(*) as count FROM work_permit GROUP BY type")
+        return {"chartType": "bar", "data": data, "title": "Permits Issued by Type"}
     
     # Fallback
     return {"chartType": "bar", "data": [{"name": "No Data", "count": 0}], "title": "Data Unavailable"}

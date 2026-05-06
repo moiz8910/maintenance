@@ -14,6 +14,8 @@ import {
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, LabelList 
 } from 'recharts';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const COLORS = ['#0f172a', '#6366f1', '#10b981', '#f59e0b', '#ef4444'];
 
@@ -47,7 +49,8 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
     setSelectedStatus(status);
     setFetchingWo(true);
     try {
-      const res = await fetch(`/api/work-orders?status=${status}`);
+      const url = status === 'All' ? '/api/work-orders' : `/api/work-orders?status=${status}`;
+      const res = await fetch(url);
       const json = await res.json();
       setWorkOrdersData(json);
     } catch (e) {
@@ -55,6 +58,13 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
     } finally {
       setFetchingWo(false);
     }
+  };
+
+  const statusBadge = (status: string) => {
+    const s = (status || '').toLowerCase();
+    if (s === 'closed') return 'bg-rose-50 text-rose-700';
+    if (s === 'in-progress' || s === 'approved') return 'bg-emerald-50 text-emerald-700';
+    return 'bg-amber-50 text-amber-700';
   };
 
   const toggleView = () => {
@@ -87,9 +97,14 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: `Analyze the provided chart data specifically for the '${kpiId.replace(/-/g, ' ')}' KPI. Be extremely concise and sharp. Avoid any verbose explanations. Structure your response EXACTLY in three parts:
-1. Internal: 1-2 sharp bullet points on internal chart trends.
-2. External: 1-2 sharp bullet points on global aluminum industry benchmarks for this KPI.
-3. Conclusion: A single concluding sentence.`,
+**Internal**
+- 1-2 sharp bullet points on internal chart trends.
+
+**External**
+- 1-2 sharp bullet points on global aluminum industry benchmarks for this KPI.
+
+**Conclusion**
+- A single concluding sentence.`,
           context_data: contextData 
         })
       });
@@ -144,9 +159,14 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
               </h3>
               <div className="flex gap-2">
                 {selectedStatus ? (
-                  <button onClick={() => setSelectedStatus(null)} className="text-[10px] text-indigo-600 font-black uppercase tracking-widest px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors">
-                    &larr; Back to Chart
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleBarClick({ name: 'All' }, true)} className="text-[10px] text-slate-600 font-black uppercase tracking-widest px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                      All Orders
+                    </button>
+                    <button onClick={() => setSelectedStatus(null)} className="text-[10px] text-indigo-600 font-black uppercase tracking-widest px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors">
+                      &larr; Back to Chart
+                    </button>
+                  </div>
                 ) : (
                   <>
                     {kpiId === 'manpower-utilization' && (
@@ -192,7 +212,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                           </td>
                           <td className="px-4 py-3 text-[10px] text-slate-600 max-w-[260px] truncate" title={row.description}>{row.description}</td>
                           <td className="px-4 py-3 text-[10px] font-bold">
-                            <span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-full">{row.status}</span>
+                            <span className={`px-2 py-1 rounded-full font-black ${statusBadge(row.status)}`}>{row.status}</span>
                           </td>
                           <td className="px-4 py-3 text-[10px]">
                             <span className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold group-hover:bg-indigo-700 transition-colors">View Plan →</span>
@@ -304,13 +324,19 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
               <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">AI Insights</h3>
             </div>
 
-            <div className="text-xs font-medium text-slate-700 leading-relaxed bg-white p-4 rounded-xl border border-slate-100 shadow-sm whitespace-pre-line max-h-[400px] overflow-y-auto min-h-[80px]">
+            <div className="text-xs font-medium text-slate-700 leading-relaxed bg-white p-4 rounded-xl border border-slate-100 shadow-sm max-h-[400px] overflow-y-auto min-h-[80px]">
               {aiLoading ? (
                 <div className="flex items-center justify-center h-full w-full py-4">
                   <Loader2 className="animate-spin text-indigo-600" size={16} />
                 </div>
               ) : (
-                aiInsight || "No insights available."
+                aiInsight ? (
+                  <div className="prose prose-sm max-w-none prose-slate">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{aiInsight}</ReactMarkdown>
+                  </div>
+                ) : (
+                  "No insights available."
+                )
               )}
             </div>
           </div>

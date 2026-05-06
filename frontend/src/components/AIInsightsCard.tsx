@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import { Sparkles, Send, Loader2, BrainCircuit } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const AIInsightsCard = () => {
   const [query, setQuery] = useState('');
@@ -82,8 +84,8 @@ const AIInsightsCard = () => {
                <div className="w-2 h-6 bg-indigo-600 rounded-full" />
                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-900">Analysis Result</span>
              </div>
-             <div className="prose prose-sm max-w-none text-slate-700 leading-relaxed font-medium whitespace-pre-line">
-               {insight}
+             <div className="prose prose-sm max-w-none text-slate-700 leading-relaxed font-medium">
+               <ReactMarkdown remarkPlugins={[remarkGfm]}>{insight}</ReactMarkdown>
              </div>
           </div>
         )}

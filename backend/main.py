@@ -114,7 +114,161 @@ async def get_work_orders(status: Optional[str] = None):
     query += " ORDER BY has_task DESC, w.work_order_class ASC"
     return safe_query(query)
 
+@app.post("/api/work-orders/{wo_id}/approve")
+async def approve_work_order(wo_id: str):
+    conn = sqlite3.connect(settings.db_path)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE work_order SET work_order_status = 'In-Progress' WHERE id = ?", (wo_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+@app.post("/api/work-permit/{permit_id}/generate")
+async def generate_permit_document(permit_id: str):
+    """Generate an AI-powered work permit PDF document using OpenAI."""
+    import openai as _openai
+    import json as _json
+
+    _api_key = os.getenv("OPENAI_API_KEY", "")
+    print(f"[Permit] Generating permit for: {permit_id} | API key present: {bool(_api_key)}")
+    _openai_client = _openai.OpenAI(api_key=_api_key)
+
+    # ── 1. Fetch permit details ──────────────────────────────────────────────
+    permits = safe_query("""
+        SELECT wp.id, wp.description, wp.type,
+               wp.work_permit_open_day, wp.work_permit_open_time,
+               wp.work_permit_end_day, wp.work_permit_end_time,
+               wp.status, wp.status_change_timestamp,
+               woti.work_order as work_order_id,
+               woti.work_order_task_item_open_day as task_open_day,
+               woti.work_order_task_item_open_time as task_open_time,
+               woti.work_order_task_item_finish_day as task_finish_day,
+               woti.work_order_task_item_finish_time as task_finish_time
+        FROM work_permit wp
+        JOIN work_order_task_item woti ON wp.work_order_task_item = woti.id
+        WHERE wp.id = ?
+    """, (permit_id,))
+
+    if not permits:
+        raise HTTPException(status_code=404, detail="Permit not found")
+    permit = permits[0]
+
+    # ── 2. Fetch related work order ──────────────────────────────────────────
+    wo_id = permit.get("work_order_id", "")
+    wos = safe_query("""
+        SELECT w.id, w.repair_description, w.repair_type, w.work_order_class,
+               w.work_order_status, w.work_order_open_day, w.work_order_open_time,
+               a.name as asset_name, at.type as asset_type, a.location, a.criticality
+        FROM work_order w
+        LEFT JOIN work_order_task_item woti ON woti.work_order = w.id
+        LEFT JOIN asset a ON woti.asset = a.id
+        LEFT JOIN asset_type at ON a.type = at.id
+        WHERE w.id = ?
+        LIMIT 1
+    """, (wo_id,))
+    wo = wos[0] if wos else {}
+
+    # ── 3. Fetch manpower ────────────────────────────────────────────────────
+    manpower = safe_query("""
+        SELECT te.name, te.role_designation, te.discipline_trade, tel.technician_service_period
+        FROM technician_engineer_linkage tel
+        JOIN work_order_task_item woti ON tel.work_order_task_item = woti.id
+        JOIN technician_engineer te ON tel.technician_engineer_engaged = te.id
+        WHERE woti.work_order = ?
+    """, (wo_id,))
+
+    # ── 4. Fetch materials ───────────────────────────────────────────────────
+    materials = safe_query("""
+        SELECT mm.description as material, m.quantity_used
+        FROM task_material_linkage m
+        JOIN work_order_task_item woti ON m.work_order_task_item = woti.id
+        JOIN material_master mm ON m.material_used = mm.id
+        WHERE woti.work_order = ?
+    """, (wo_id,))
+
+    # ── 5. Build LLM context ─────────────────────────────────────────────────
+    personnel_lines = "\n".join([
+        f"  - {m.get('name')} | {m.get('role_designation')} | {m.get('discipline_trade')} | {m.get('technician_service_period')}h"
+        for m in manpower
+    ])
+    material_lines = "\n".join([
+        f"  - {m.get('material')} x{m.get('quantity_used')}"
+        for m in materials
+    ])
+
+    context = f"""
+Work Permit ID: {permit.get('id')}
+Permit Type: {permit.get('type')}
+Description: {permit.get('description')}
+Status: {permit.get('status')}
+Valid From: {permit.get('work_permit_open_day')} {permit.get('work_permit_open_time')}
+Valid Until: {permit.get('work_permit_end_day')} {permit.get('work_permit_end_time')}
+
+Work Order: {wo_id}
+Repair Type: {wo.get('repair_type')}
+WO Class: {wo.get('work_order_class')}
+Repair Description: {wo.get('repair_description')}
+Asset: {wo.get('asset_name')} ({wo.get('asset_type')})
+Location: {wo.get('location')}
+Asset Criticality: {wo.get('criticality')}
+
+Scheduled Window: {permit.get('task_open_day')} {permit.get('task_open_time')} to {permit.get('task_finish_day')} {permit.get('task_finish_time')}
+
+Assigned Personnel ({len(manpower)}):
+{personnel_lines}
+
+Materials Required ({len(materials)}):
+{material_lines}
+"""
+
+    # ── 6. Call OpenAI GPT-4o ─────────────────────────────────────────────────
+    system_prompt = """You are a certified HSE (Health, Safety & Environment) officer and industrial maintenance expert 
+specializing in aluminum smelter operations. Generate a comprehensive, professional work permit document.
+
+Return ONLY valid JSON with exactly these keys:
+{
+  "permit_type_full": "Full official name of the permit type",
+  "work_scope": "2-3 sentences describing the precise work scope",
+  "location_details": "Specific location and access path description",
+  "hazard_identification": ["4-6 specific hazards relevant to this work type and asset"],
+  "risk_level": "HIGH or MEDIUM or LOW",
+  "risk_justification": "One sentence justifying the risk level",
+  "safety_controls": ["5-7 specific safety control measures for this work"],
+  "ppe_requirements": ["All required PPE items with specifications"],
+  "isolation_requirements": "Specific lockout/tagout and energy isolation procedure",
+  "environmental_controls": ["2-3 environmental protection measures"],
+  "emergency_procedure": "Step-by-step emergency response for this specific work type",
+  "special_instructions": "Any specific technical or operational instructions",
+  "authorization_conditions": "Conditions that must be met for permit validity",
+  "competency_requirements": "Required certifications and qualifications for this work"
+}"""
+
+    try:
+        print(f"[Permit] Calling OpenAI GPT-4o for permit {permit_id}...")
+        response = _openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Generate a work permit document for:\n{context}"}
+            ],
+            response_format={"type": "json_object"}
+        )
+        ai_data = _json.loads(response.choices[0].message.content)
+        print(f"[Permit] OpenAI response received successfully for {permit_id}")
+    except Exception as e:
+        print(f"[Permit Generation ERROR] {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"OpenAI generation failed: {str(e)}")
+
+    return {
+        "permit": permit,
+        "work_order": wo,
+        "manpower": manpower,
+        "materials": materials,
+        "ai_document": ai_data
+    }
+
 @app.get("/api/execution-plan/{work_order_id}")
+
 async def get_execution_plan(work_order_id: str):
     tasks = safe_query("""
         SELECT wt.id, wt.task as task_ref, t.description as task_description, t.discipline,
@@ -265,6 +419,57 @@ async def get_execution_plan(work_order_id: str):
         WHERE t.work_order = ?
     """, (work_order_id,))
     
+    # ── Live Auto-Closure Rule ────────────────────────────────────────────────
+    # If the last task item's finish datetime < now and WO is still Pending/Approved,
+    # close it immediately and stamp the closure time.
+    _now = datetime.now()
+
+    _last_task_finish = safe_query("""
+        SELECT work_order_task_item_open_day   AS day,
+               work_order_task_item_finish_time AS time
+        FROM work_order_task_item
+        WHERE work_order = ?
+        ORDER BY work_order_task_item_open_day DESC,
+                 work_order_task_item_finish_time DESC
+        LIMIT 1
+    """, (work_order_id,))
+
+    if _last_task_finish:
+        _lt = _last_task_finish[0]
+        _day_str  = _lt.get("day", "") or ""
+        _time_str = _lt.get("time", "") or ""
+        try:
+            _d, _m, _y = _day_str.strip().split('-')
+            _h, _mi   = _time_str.strip().split(':')
+            _last_dt  = datetime(2000 + int(_y), int(_m), int(_d), int(_h), int(_mi))
+        except Exception:
+            _last_dt = None
+
+        if _last_dt and _last_dt < _now:
+            # Only close if still in a non-final state
+            _current_status = safe_query(
+                "SELECT work_order_status FROM work_order WHERE id = ?", (work_order_id,)
+            )
+            _status_val = (_current_status[0].get("work_order_status", "") if _current_status else "").lower()
+            if _status_val not in ("closed",):
+                safe_query(
+                    """UPDATE work_order
+                       SET work_order_status   = 'Closed',
+                           work_order_end_day  = ?,
+                           work_order_end_time = ?
+                       WHERE id = ?""",
+                    (_day_str, _time_str, work_order_id)
+                )
+                # Ensure all permits for this WO are marked Available
+                safe_query(
+                    """UPDATE work_permit
+                       SET status = 'Available'
+                       WHERE work_order_task_item IN (
+                           SELECT id FROM work_order_task_item WHERE work_order = ?
+                       )""",
+                    (work_order_id,)
+                )
+
     work_order = safe_query("""
         SELECT w.*, a.name as asset_name, a.id as asset_id
         FROM work_order w
@@ -382,14 +587,21 @@ async def get_schedule():
         if dt_obj < (now - timedelta(days=2)):
             continue
             
-        # Check if it should be closed
+        # Check if it should be closed (don't override approved/in-progress WOs)
         status = row["work_order_status"]
         end_time_str = row["end_time"] or "23:59"
         finish_dt = datetime.combine(dt_obj.date(), datetime.strptime(end_time_str, "%H:%M").time())
         
-        if finish_dt < now and status.lower() != 'closed':
+        if finish_dt < now and status.lower() not in ('closed', 'in-progress'):
             status = 'Closed'
             safe_query("UPDATE work_order SET work_order_status = 'Closed' WHERE id = ?", (row["work_order_id"],))
+            # Close logic: all permits for this WO must be set to Available on closure
+            safe_query("""
+                UPDATE work_permit SET status = 'Available'
+                WHERE work_order_task_item IN (
+                    SELECT id FROM work_order_task_item WHERE work_order = ?
+                )
+            """, (row["work_order_id"],))
             
         schedule.append({
             "id": row["work_order_id"],

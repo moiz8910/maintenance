@@ -245,26 +245,20 @@ def get_predictive_pct():
 def get_safety_stats():
     print("[Stage 12] Computing Safety KPI...")
     conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(incident_events)")
-    cols = [r[1] for r in cursor.fetchall()]
-    
-    type_col = "incident_type"
-    for c in ['incident_type', 'type', 'event_type', 'incident_category', 'category', 'incident_class']:
-        if c in cols:
-            type_col = c
-            break
-    if type_col not in cols and cols:
-        type_col = cols[1] if len(cols) > 1 else cols[0]
-        
-    total_incidents = safe_scalar(conn, "SELECT COUNT(*) FROM incident_events")
-    lti_count = safe_scalar(conn, f"SELECT COUNT(*) FROM incident_events WHERE {type_col}='LTI'")
+    total_wos = safe_scalar(conn, "SELECT COUNT(*) FROM work_order")
+    # count WOs that have a permit
+    wos_with_permit = safe_scalar(conn, """
+        SELECT COUNT(DISTINCT t.work_order) 
+        FROM work_permit p 
+        JOIN work_order_task_item t ON p.work_order_task_item = t.id
+    """)
+    pct = round((wos_with_permit / total_wos * 100), 1) if total_wos > 0 else 0
     conn.close()
     return {
-        "name": "Safety Statistics",
-        "value": str(total_incidents),
-        "status": "critical" if total_incidents > 0 else "good",
-        "subtext": f"LTI: {lti_count}",
+        "name": "Safety Compliance",
+        "value": f"{pct:.1f}%",
+        "status": "good" if pct >= 80 else "warning",
+        "subtext": f"{wos_with_permit}/{total_wos} WOs with permits",
     }
 
 # ─────────────────────────────────────────────────────────────
