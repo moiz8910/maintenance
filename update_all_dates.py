@@ -55,34 +55,43 @@ def update_dates():
     all_wos = [dict(r) for r in cursor.fetchall()]
     print(f"Total work orders to reschedule: {len(all_wos)}")
 
-    # ── 2. Assign task scheduling slots (max 4/day from today) ───────────────
-    schedule_day  = TODAY      # task items start from today
+    # ── 2. Assign task scheduling slots (max 4/day, max 20 pending) ───────────
+    MAX_PER_DAY = 4
+    MAX_PENDING = 20
+    schedule_day  = TODAY      # task items start from today for pending
     count_on_day  = 0
+    pending_count = 0
     updated = 0
     skipped = 0
 
-    for wo in all_wos:
+    # Sort all_wos by criticality first to keep the most important ones pending
+    all_wos.sort(key=lambda x: (x['criticality'], x['id']))
+
+    for idx, wo in enumerate(all_wos):
         wo_id       = wo['id']
         old_day_str = wo['work_order_open_day']
-        wo_status   = (wo.get('work_order_status') or '').lower()
-
-        # ── Task scheduling slot ──────────────────────────────────────────────
-        if count_on_day >= MAX_PER_DAY:
-            schedule_day  = schedule_day + timedelta(days=1)
-            count_on_day  = 0
-        count_on_day += 1
-
-        # Rule: No work order can be closed in the future.
-        if wo_status == 'closed' and schedule_day > TODAY:
-            task_day = TODAY
-        else:
-            task_day = schedule_day          # when the work is actually done
         
-        task_day_str = fmt_day(task_day)
+        if pending_count < MAX_PENDING:
+            # Keep as Pending and schedule forward
+            wo_status = 'pending'
+            if count_on_day >= MAX_PER_DAY:
+                schedule_day  = schedule_day + timedelta(days=1)
+                count_on_day  = 0
+            count_on_day += 1
+            pending_count += 1
+            task_day = schedule_day
+            wo_open_day = task_day + timedelta(days=_random.choice([-3, -2]))
+            
+            cursor.execute("UPDATE work_order SET work_order_status = 'Pending' WHERE id = ?", (wo_id,))
+        else:
+            # Force status to Closed and put in past
+            wo_status = 'closed'
+            task_day = TODAY + timedelta(days=_random.randint(-15, -1))
+            wo_open_day = task_day + timedelta(days=_random.randint(-5, -2))
+            
+            cursor.execute("UPDATE work_order SET work_order_status = 'Closed' WHERE id = ?", (wo_id,))
 
-        # ── WO open date: today-2 or today-3 ─────────────────────────────────
-        # (WO was raised a couple of days before it was scheduled)
-        wo_open_day     = TODAY + timedelta(days=_random.choice(WO_OPEN_OFFSETS))
+        task_day_str = fmt_day(task_day)
         wo_open_day_str = fmt_day(wo_open_day)
 
         # ── 3. Shift task items to the scheduling slot ────────────────────────

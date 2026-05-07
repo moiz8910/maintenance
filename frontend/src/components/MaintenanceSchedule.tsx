@@ -15,6 +15,7 @@ interface ScheduleItem {
   role: string;
   hasPermit: boolean;
   status: string;
+  openDate?: string;
 }
 
 const MaintenanceSchedule = () => {
@@ -199,6 +200,9 @@ const MaintenanceSchedule = () => {
                             <span className="truncate flex-1 font-black">{item.id}</span>
                           </div>
                           {hasOverlap && <AlertTriangle size={8} className="text-rose-500 shrink-0" />}
+                        </div>
+                        <div className="mt-1 flex items-center justify-between">
+                          <span className="text-[7px] text-slate-400 font-black uppercase tracking-tighter">Opened: {item.openDate || 'N/A'}</span>
                         </div>
 
                       </div>

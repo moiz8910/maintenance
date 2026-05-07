@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import ExecutionPlanModal from './ExecutionPlanModal';
+import ExecutionAdviseModal from './ExecutionAdviseModal';
 import { 
   Sparkles, 
   Loader2, 
@@ -35,6 +36,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
   const [workOrdersData, setWorkOrdersData] = useState<any[]>([]);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | null>(null);
   const [fetchingWo, setFetchingWo] = useState(false);
+  const [classFilter, setClassFilter] = useState<string>('All');
 
   // Auto-fetch work orders if initialStatus is provided
   useEffect(() => {
@@ -52,7 +54,26 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
       const url = status === 'All' ? '/api/work-orders' : `/api/work-orders?status=${status}`;
       const res = await fetch(url);
       const json = await res.json();
-      setWorkOrdersData(json);
+      
+      // Sort: Class (A > B > C) as primary, Date (Oldest > Newest) as secondary
+      const sorted = (json || []).sort((a: any, b: any) => {
+        // Class sorting
+        const classOrder: Record<string, number> = { 'Class A': 1, 'Class B': 2, 'Class C': 3, 'A': 1, 'B': 2, 'C': 3 };
+        const orderA = classOrder[a.class] || 99;
+        const orderB = classOrder[b.class] || 99;
+        
+        if (orderA !== orderB) return orderA - orderB;
+
+        // Date sorting (secondary)
+        if (!a.date || !b.date) return 0;
+        const [d1, m1, y1] = a.date.split('-').map(Number);
+        const [d2, m2, y2] = b.date.split('-').map(Number);
+        const date1 = new Date(2000 + y1, m1 - 1, d1).getTime();
+        const date2 = new Date(2000 + y2, m2 - 1, d2).getTime();
+        return date1 - date2;
+      });
+      
+      setWorkOrdersData(sorted);
     } catch (e) {
       console.error(e);
     } finally {
@@ -159,7 +180,20 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
               </h3>
               <div className="flex gap-2">
                 {selectedStatus ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filter:</span>
+                      <select 
+                        value={classFilter}
+                        onChange={(e) => setClassFilter(e.target.value)}
+                        className="bg-transparent text-[10px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                      >
+                        <option value="All">All Classes</option>
+                        <option value="Class A">Class A</option>
+                        <option value="Class B">Class B</option>
+                        <option value="Class C">Class C</option>
+                      </select>
+                    </div>
                     <button onClick={() => handleBarClick({ name: 'All' }, true)} className="text-[10px] text-slate-600 font-black uppercase tracking-widest px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
                       All Orders
                     </button>
@@ -197,16 +231,20 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                     <thead className="bg-slate-50 sticky top-0 shadow-sm">
                       <tr>
                         <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">ID</th>
+                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">WO open date</th>
                         <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Class</th>
                         <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Description</th>
                         <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Status</th>
-                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Action</th>
+                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Plan</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {workOrdersData.map((row: any, i: number) => (
+                      {workOrdersData
+                        .filter(row => classFilter === 'All' || row.class === classFilter || (classFilter === 'Class A' && row.class === 'A') || (classFilter === 'Class B' && row.class === 'B') || (classFilter === 'Class C' && row.class === 'C'))
+                        .map((row: any, i: number) => (
                         <tr key={i} className="hover:bg-indigo-50/50 cursor-pointer transition-colors group" onClick={() => setSelectedWorkOrder(row.id)}>
                           <td className="px-4 py-3 text-[10px] font-bold text-indigo-600 group-hover:text-indigo-700 transition-colors">{row.id}</td>
+                          <td className="px-4 py-3 text-[10px] font-bold text-slate-500 whitespace-nowrap">{row.date || '—'}</td>
                           <td className="px-4 py-3 text-[10px] font-bold text-slate-700">
                             <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{row.class}</span>
                           </td>
@@ -215,7 +253,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                             <span className={`px-2 py-1 rounded-full font-black ${statusBadge(row.status)}`}>{row.status}</span>
                           </td>
                           <td className="px-4 py-3 text-[10px]">
-                            <span className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold group-hover:bg-indigo-700 transition-colors">View Plan →</span>
+                            <span className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold group-hover:bg-indigo-700 transition-colors">Execution Advise →</span>
                           </td>
                         </tr>
                       ))}
@@ -354,7 +392,12 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
         </div>
       </div>
 
-      {selectedWorkOrder && (
+      {selectedWorkOrder && kpiId === 'work-order' && initialStatus === 'Pending' ? (
+        <ExecutionAdviseModal 
+          workOrderId={selectedWorkOrder} 
+          onClose={() => setSelectedWorkOrder(null)} 
+        />
+      ) : selectedWorkOrder && (
         <ExecutionPlanModal 
           workOrderId={selectedWorkOrder} 
           onClose={() => setSelectedWorkOrder(null)} 

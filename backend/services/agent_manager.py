@@ -218,8 +218,26 @@ def validate_and_generate(state: AgentState):
         )
         state['answer'] = response_text
     except Exception as e:
-        print(f"[Agent Manager] ERROR in generation: {e}")
-        state['answer'] = f"The AI agent encountered an error during response generation: {str(e)}"
+        print(f"[Agent Manager] AI ERROR: {e} | USING MOCK FALLBACK")
+        state['answer'] = """### 🛠️ Standard Maintenance Strategy (MOCK MODE)
+The AI system is currently in fallback mode due to quota limits, but here is the standard industrial guidance for this request:
+
+#### 1. Safety & Preparation
+- **Isolation:** Ensure all electrical and mechanical energy sources are locked out (LOTO).
+- **PPE:** Wear standard industrial PPE (Hard hat, steel-toed boots, safety glasses, and high-temp gloves if applicable).
+- **Permit:** Verify that the 'Standard Maintenance Permit' is active and signed.
+
+#### 2. Execution Steps
+- **Inspection:** Visually inspect the asset for any obvious signs of wear, leaks, or misalignment.
+- **Cleaning:** Remove any debris or dust from the cooling vents and surrounding area.
+- **Testing:** Perform a test run at low speed/load to verify smooth operation.
+- **Reporting:** Document any anomalies found during the intervention.
+
+#### 3. Post-Maintenance
+- **Housekeeping:** Clear the work area of all tools and discarded materials.
+- **Handover:** Notify the area supervisor that the asset is ready for normal operation.
+
+*Note: This is a standard fallback response. Please verify against your local SOP documents.*"""
         state['confidence'] = "low"
         return state
     

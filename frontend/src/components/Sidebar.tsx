@@ -16,10 +16,10 @@ import { useStore } from '@/store/useStore';
 import { usePathname } from 'next/navigation';
 
 const agents = [
-  { id: 'maintenance_auto_pilot', name: 'Maintenance Auto-Pilot', icon: Bot, desc: 'Predictive Actions' },
-  { id: 'asset_strategy', name: 'Asset Strategy Agent', icon: Cpu, desc: 'Schedule Optimization' },
-  { id: 'business_analyst', name: 'Intelligence Advisor', icon: BarChart3, desc: 'KPI Insights' },
-  { id: 'work_instruction_coach', name: 'Work Instruction Coach', icon: BookOpen, desc: 'SOP Generation' },
+  { id: 'maintenance_auto_pilot', name: 'Maintenance Auto-Pilot', icon: Bot, desc: 'Work Orders execution plan' },
+  { id: 'asset_strategy', name: 'Asset Strategy Agent', icon: Cpu, desc: 'Maintenance strategy' },
+  { id: 'business_analyst', name: 'Intelligent Advisor', icon: BarChart3, desc: 'Intelligent review & reporting' },
+  { id: 'work_instruction_coach', name: 'Work Instruction Coach', icon: BookOpen, desc: 'Instruction guide' },
   { id: 'reliability_assistant', name: 'Reliability Assistant', icon: ShieldCheck, desc: 'Failure Prevention' },
   { id: 'asset_steward', name: 'Asset Steward', icon: Settings2, desc: 'Lifecycle Tracking' },
 ];
@@ -31,6 +31,18 @@ const Sidebar = () => {
   const handleAgentClick = async (agentId: string, agentName: string) => {
     if (agentId === 'maintenance_auto_pilot') {
       setActiveKpi('maintenance-auto-pilot');
+      setTimeout(() => {
+        const container = document.getElementById('scroll-container');
+        const element = document.getElementById('main-content-area');
+        if (container && element) {
+          container.scrollTo({ top: element.offsetTop - 20, behavior: 'smooth' });
+        }
+      }, 100);
+      return;
+    }
+
+    if (agentId === 'work_instruction_coach') {
+      setActiveKpi('work-instruction-coach');
       setTimeout(() => {
         const container = document.getElementById('scroll-container');
         const element = document.getElementById('main-content-area');

@@ -157,8 +157,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* Specialty Full-Screen Views (Scheduler, Search, Assets) */}
-      {(activeKpi === 'maintenance-auto-pilot' || activeKpi === 'search' || activeKpi === 'assets') && (
+      {/* Specialty Full-Screen Views (Scheduler, Search, Assets, Work Instruction Coach) */}
+      {(activeKpi === 'maintenance-auto-pilot' || activeKpi === 'search' || activeKpi === 'assets' || activeKpi === 'work-instruction-coach') && (
         <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col animate-in slide-in-from-right duration-500">
            <div className="flex-1 overflow-hidden flex flex-col">
               <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white">
@@ -166,7 +166,7 @@ export default function Home() {
                    &larr; Back to Dashboard
                  </button>
                  <div className="px-3 py-1 bg-indigo-50 rounded-full text-[9px] font-black text-indigo-600 uppercase tracking-widest">
-                   {activeKpi.replace(/-/g, ' ')}
+                   {activeKpi === 'work-instruction-coach' ? 'Instruction guide' : activeKpi.replace(/-/g, ' ')}
                  </div>
               </div>
               <div className="flex-1 overflow-y-auto p-8">
@@ -196,6 +196,10 @@ export default function Home() {
                         {autoPilotMode === 'schedule' ? <MaintenanceSchedule /> : <DrilldownView kpiId="work-order" initialStatus="Pending" onClose={() => setActiveKpi(null)} />}
                       </div>
                    </div>
+                ) : activeKpi === 'work-instruction-coach' ? (
+                  <div className="max-w-7xl mx-auto w-full h-full">
+                    <DrilldownView kpiId="work-order" initialStatus="Pending" onClose={() => setActiveKpi(null)} />
+                  </div>
                 ) : activeKpi === 'search' ? (
                   <div className="max-w-7xl mx-auto w-full h-full">
                     <SearchView onClose={() => { setActiveKpi(null); setSearchQuery(''); }} />
