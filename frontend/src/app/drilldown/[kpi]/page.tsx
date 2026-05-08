@@ -171,6 +171,7 @@ export default function DrilldownPage() {
                         </>
                       )}
                       <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '16px', border: 'none'}} />
+                      <Legend verticalAlign="top" align="right" />
                       <Bar dataKey={Object.keys(data.data[0])[1] || 'count'} radius={[6, 6, 6, 6]} barSize={32}>
                         {data.data.map((entry: any, index: number) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

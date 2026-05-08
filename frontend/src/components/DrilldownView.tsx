@@ -272,7 +272,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
                   <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                  {kpiId !== 'pm-adherence' && <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />}
+                  <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
                   
                   {kpiId === 'pm-adherence' ? (
                     <Line type="monotone" dataKey="adherence" name="Adherence" stroke="#6366f1" strokeWidth={3} dot={{r: 4}}>
