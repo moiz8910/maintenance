@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 # Import our custom engines
 from services.kpi_engine import get_all_kpis
 from services.drilldown_engine import get_drilldown_data, safe_query
-from services.agent_manager import run_maintenance_assistant, run_agent_workflow
+from services.agent_manager import run_maintenance_assistant, run_agent_workflow, generate_with_retry
+from services.scheduling_engine import reschedule_work_order
 from lookup_router import router as lookup_router
 
 load_dotenv()
@@ -97,7 +98,9 @@ async def get_assets():
             a.unplanned_downtime_uom,
             a.sop_number,
             a.sop_description,
-            p.name           AS parent_name
+            p.name           AS parent_name,
+            p.id             AS parent_id,
+            p.location       AS parent_location
         FROM asset a
         LEFT JOIN asset_type at ON a.type = at.id
         LEFT JOIN asset p ON a.parent_asset = p.id
@@ -109,22 +112,185 @@ async def get_work_orders(status: Optional[str] = None):
     query = """
         SELECT w.id, w.repair_description as description, w.work_order_class as class, w.work_order_status as status,
                CASE WHEN EXISTS (SELECT 1 FROM work_order_task_item t WHERE t.work_order = w.id) THEN 1 ELSE 0 END as has_task,
-               w.work_order_open_day as date
+               w.work_order_open_day as date,
+               (SELECT t.work_order_task_item_open_day FROM work_order_task_item t WHERE t.work_order = w.id LIMIT 1) as schedule_date,
+               CASE WHEN EXISTS (
+                   SELECT 1 
+                   FROM task_material_linkage m
+                   JOIN work_order_task_item ti ON m.work_order_task_item = ti.id
+                   LEFT JOIN on_hand_inventory inv ON inv.material = m.material_used
+                   WHERE ti.work_order = w.id
+                   GROUP BY m.id
+                   HAVING m.quantity_used > COALESCE(SUM(inv.stock_available_on_hand), 0)
+               ) THEN 1 ELSE 0 END as pr_needed
         FROM work_order w
     """
     if status:
         query += f" WHERE LOWER(w.work_order_status) = '{status.lower()}'"
-    query += " ORDER BY has_task DESC, w.work_order_class ASC"
+    query += " ORDER BY pr_needed DESC, has_task DESC, w.work_order_class ASC"
     return safe_query(query)
 
-@app.post("/api/work-order/{wo_id}/execution-advise")
-async def get_execution_advise(wo_id: str):
-    log_stage(14, f"Generating Execution Advise for WO: {wo_id}")
+@app.get("/api/diagnostic/work-orders")
+async def get_diagnostic_work_orders():
+    """Fetch all work orders currently in the 'Diagnostic' state."""
+    log_stage(15, "Fetching Diagnostic Queue...")
+    query = """
+        SELECT w.id, w.repair_description as description, w.work_order_class as class, 
+               w.work_order_status as status, w.repair_type as type,
+               w.asset_id as asset, a.name as asset_name, w.work_order_open_day as date
+        FROM work_order w
+        LEFT JOIN asset a ON w.asset_id = a.id
+        WHERE LOWER(w.work_order_status) = 'diagnostic'
+        ORDER BY w.work_order_open_day DESC
+    """
+    return safe_query(query)
+
+@app.get("/api/drilldown/safety-incidents")
+async def get_drilldown_incidents(filter: Optional[str] = None):
+    query = "SELECT * FROM incident_events"
+    if filter and filter != 'All':
+        query += f" WHERE incident_type = '{filter}'"
+    return safe_query(query)
+
+@app.get("/api/drilldown/safety-compliance")
+async def get_drilldown_compliance(filter: Optional[str] = None):
+    query = "SELECT id, work_order, asset, type, status FROM work_permit"
+    if filter and filter != 'All':
+        query += f" WHERE type = '{filter}'"
+    return safe_query(query)
+
+@app.get("/api/drilldown/manpower-utilization")
+async def get_drilldown_technicians(filter: Optional[str] = None):
+    query = "SELECT name, role_designation as role, discipline_trade as discipline, standard_hourly_rate as rate FROM technician_engineer"
+    if filter and filter != 'All':
+        query += f" WHERE role_designation = '{filter}' OR discipline_trade = '{filter}'"
+    return safe_query(query)
+
+@app.get("/api/drilldown/purchase-requisition")
+async def get_drilldown_prs(filter: Optional[str] = None):
+    query = "SELECT id, material_name as material, quantity, status FROM purchase_requisition"
+    if filter and filter != 'All':
+        query += f" WHERE LOWER(status) = '{filter.lower()}'"
+    return safe_query(query)
+
+@app.post("/api/work-order/{wo_id}/diagnose")
+async def run_diagnosis(wo_id: str):
+    """Use AI to analyze a breakdown and suggest tasks."""
+    # 1. Fetch WO and History
+    wo_details = safe_query("SELECT repair_description, asset_id as asset, repair_type FROM work_order WHERE id = ?", (wo_id,))
+    if not wo_details:
+        raise HTTPException(status_code=404, detail="Work Order not found")
     
-    # Fetch WO and Asset details
+    asset_id = wo_details[0]['asset']
+    history = safe_query("""
+        SELECT repair_description, work_order_status 
+        FROM work_order 
+        WHERE asset = ? AND id != ? AND work_order_status = 'Closed'
+        LIMIT 5
+    """, (asset_id, wo_id))
+    
+    # 2. Construct Prompt
+    prompt = f"""
+    Act as a Senior Maintenance Diagnostic Expert for an Aluminum Smelter.
+    
+    Current Problem: {wo_details[0]['repair_description']}
+    Repair Type: {wo_details[0]['repair_type']}
+    Asset ID: {asset_id}
+    
+    Past History for this Asset:
+    {json.dumps(history)}
+    
+    CRITICAL: 
+    - Provide a definitive, technical Root Cause Analysis.
+    - DO NOT use phrases like "in the absence of history", "based on limited data", or "it's difficult to say".
+    - Act as if you have seen this problem a thousand times and provide your most probable engineering judgment.
+    
+    Return your response EXACTLY in this JSON format:
+    {{
+      "probable_cause": "description here",
+      "suggested_tasks": ["Task 1", "Task 2", "Task 3"]
+    }}
+    """
+    from services.agent_manager import generate_with_retry
+    result_str = generate_with_retry(prompt)
+    print(f"[Diagnosis API] Raw Response: {result_str}")
+    
+    # Simple JSON extraction
+    try:
+        import re
+        json_match = re.search(r'\{.*\}', result_str, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            result = json.loads(result_str)
+        print(f"[Diagnosis API] Parsed Result: {result}")
+        # Add original description to result
+        result["reported_issue"] = wo_details[0].get("repair_description")
+        return result
+    except Exception as e:
+        print(f"[Diagnosis API] Parse Error: {e}")
+        return {
+            "probable_cause": "AI failed to parse response.", 
+            "suggested_tasks": ["Manual inspection required"],
+            "reported_issue": wo_details[0].get("repair_description")
+        }
+
+@app.post("/api/work-order/{wo_id}/approve-diagnosis")
+async def approve_diagnosis(wo_id: str, payload: dict):
+    """Save approved tasks and move WO to Pending."""
+    tasks = payload.get("tasks", [])
+    asset_id = payload.get("asset_id")
+    
+    print(f"[Approval API] Starting approval for {wo_id} (Asset: {asset_id})")
+    
+    import sqlite3
+    import os
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "maintenance.db")
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # 1. Add Task Items
+        for idx, task_desc in enumerate(tasks):
+            ti_id = f"WOT-{wo_id[3:]}-{idx+1}"
+            cursor.execute("""
+                INSERT INTO work_order_task_item 
+                (id, work_order, asset, task, work_order_task_item_open_day)
+                VALUES (?, ?, ?, ?, ?)
+            """, (ti_id, wo_id, asset_id, task_desc, datetime.now().strftime("%d-%m-%y")))
+            
+        # 2. Update WO Status
+        cursor.execute("UPDATE work_order SET work_order_status = 'Pending' WHERE id = ?", (wo_id,))
+        conn.commit()
+        
+        # 3. Trigger Auto-Pilot to populate the plan (Manpower, Materials, etc.)
+        from services.agent_manager import run_agent_workflow
+        print(f"[Approval API] Triggering Auto-Pilot for {wo_id}...")
+        try:
+            # We pass a message that specifically asks to plan this WO
+            run_agent_workflow("maintenance_auto_pilot", f"Please generate a complete execution plan for {wo_id} based on its newly diagnosed tasks.")
+        except Exception as ae:
+            print(f"[Approval API] Auto-Pilot Warning: {ae}")
+            # We don't fail the whole request if auto-pilot has a hiccup, 
+            # but it usually works fine.
+
+        print(f"[Approval API] SUCCESS: {wo_id} moved to Pending and planned.")
+        return {"status": "success", "tasks_added": len(tasks)}
+    except Exception as e:
+        print(f"[Approval API] ERROR: {e}")
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.post("/api/work-order/{wo_id}/execution-advice")
+async def get_execution_advice(wo_id: str):
+    log_stage(25, f"Generating OpenAI Execution Advice for WO {wo_id}")
+    
+    # 1. Fetch context (needed for asset_id and AI prompt)
     wos = safe_query("""
         SELECT w.id, w.repair_description, w.repair_type, w.work_order_class,
-               a.name as asset_name, at.type as asset_type, a.location, a.criticality,
+               a.id as asset_id, a.name as asset_name, at.type as asset_type, a.location, a.criticality,
                a.sop_description
         FROM work_order w
         LEFT JOIN work_order_task_item woti ON woti.work_order = w.id
@@ -138,70 +304,105 @@ async def get_execution_advise(wo_id: str):
         raise HTTPException(status_code=404, detail="Work order not found")
     wo = wos[0]
 
+    # 2. Check Cache
+    cached = safe_query("SELECT advice FROM execution_advice_cache WHERE wo_id = ?", (wo_id,))
+    if cached:
+        return {"advice": cached[0]['advice'], "asset_id": wo['asset_id'], "cached": True}
+
+    # Fetch tasks for more context
+    tasks = safe_query("SELECT task FROM work_order_task_item WHERE work_order = ?", (wo_id,))
+    tasks_str = "\n".join([f"- {t['task']}" for t in tasks])
+
     prompt = f"""
-    You are a Master Maintenance Engineer at Vedanta Jharsuguda.
-    Generate a highly visual, rich, and detailed 'Execution Advise' for the following work order.
-    Leverage expressive typography (bolding, italics, bullet points) and relevant emojis to make the content engaging and highly readable.
+    Act as a Senior Maintenance Engineer at Vedanta Jharsuguda Aluminum Smelter.
+    Provide a detailed Execution Strategy and Advice for the following Work Order.
     
+    Context:
     Work Order ID: {wo['id']}
+    Asset ID: {wo['asset_id']}
+    Asset Name: {wo['asset_name']}
+    Asset Type: {wo['asset_type']}
     Description: {wo['repair_description']}
     Type: {wo['repair_type']}
     Class: {wo['work_order_class']}
-    Asset: {wo['asset_name']} ({wo['asset_type']})
     Location: {wo['location']}
     Asset Criticality: {wo['criticality']}
     Existing SOP Info: {wo['sop_description']}
     
-    Your response must be in Markdown and include the following sections exactly as H3 (###):
+    Planned Tasks:
+    {tasks_str}
     
-    ### Safety First
-    Isolation (LOTO), PPE, and environmental hazards. Emphasize life-saving rules.
+    Structure your response with:
+    # Execution Strategy: {wo['id']}
+    **Asset ID: {wo['asset_id']}**
     
-    ### Tooling & Equipment
-    Specialized equipment and consumables.
+    ## Technical Execution Steps
+    - Provide a chronological, technical step-by-step guide.
+    - Focus on precision (e.g., torque values, alignment tolerances).
     
-    ### OEM Specifications & Guidelines
-    Specific advice from the manufacturer for this asset type and repair (tolerances, torque, lubricants).
+    ## Safety & Compliance
+    - List specific LOTO (Lockout/Tagout) requirements.
+    - PPE requirements (Industrial standard).
+    - Specific Life-Saving Rules applicable here.
     
-    ### Step-by-Step Execution
-    Detailed mechanical/technical instructions.
+    ## Tooling & Equipment
+    - List all specialized tools (e.g., laser alignment kit, hydraulic pullers).
+    - Consumables needed.
     
-    ### Quality & Post-Checks
-    Verification and functional tests.
+    ## Quality Control & OEM Standards
+    - Technical specs to verify post-repair.
     
-    ### Pitfalls & Pro-Tips
-    Specific warnings and pro-tips for this repair.
+    ## Resource Estimation
+    - Estimated man-hours by trade (Mechanical, Electrical, Instrumentation).
+    
+    Use a professional industrial tone with clear Markdown.
     """
     
-    # Import here to avoid circular imports or if needed
-    from services.agent_manager import generate_with_retry
-    
     try:
-        advise = generate_with_retry(prompt=prompt, system_prompt="You are an expert maintenance AI. You MUST generate visually stunning, beautifully formatted markdown with modern typography, relevant emojis, and clear structured lists. Make it look premium and highly engaging.")
-        return {"advise": advise}
+        import openai
+        client = openai.OpenAI(api_key=settings.openai_api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a world-class industrial maintenance consultant specializing in smelter operations."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        advice = response.choices[0].message.content
     except Exception as e:
-        print(f"[Execution Advise ERROR] {e} | USING MOCK FALLBACK")
-        return {"advise": f"""### 🛠️ Execution Advise for {wo['id']} (MOCK MODE)
-The AI system is in fallback mode, but here is the standard guidance:
+        print(f"[OpenAI Error] {e}")
+        # Fallback to Gemini if OpenAI fails
+        from services.agent_manager import generate_with_retry
+        advice = generate_with_retry(prompt)
+    
+    # 3. Save to Cache
+    try:
+        db_path = settings.db_path
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO execution_advice_cache (wo_id, advice) VALUES (?, ?)", (wo_id, advice))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Cache Error: {e}")
 
-#### 1. Safety First
-- **LOTO:** Verify isolation of all power sources.
-- **PPE:** Standard industrial kit + heat-resistant gloves.
-
-#### 2. Technical Steps
-- Inspect {wo['asset_name']} for {wo['repair_description']}.
-- Follow standard maintenance protocol for {wo['repair_type']}.
-- Ensure all bolts are torqued to OEM specifications.
-
-#### 3. Post-Check
-- Functional test under no-load condition.
-- Verify zero leakage and vibration levels."""}
+    return {"advice": advice, "asset_id": wo['asset_id'], "cached": False}
 
 @app.post("/api/work-orders/{wo_id}/approve")
 async def approve_work_order(wo_id: str):
     conn = sqlite3.connect(settings.db_path)
     cursor = conn.cursor()
     cursor.execute("UPDATE work_order SET work_order_status = 'In-Progress' WHERE id = ?", (wo_id,))
+    
+    # Also mark all associated permits as 'Available'
+    cursor.execute("""
+        UPDATE work_permit 
+        SET status = 'Available' 
+        WHERE work_order_task_item IN (
+            SELECT id FROM work_order_task_item WHERE work_order = ?
+        )
+    """, (wo_id,))
+    
     conn.commit()
     conn.close()
     return {"status": "success"}
@@ -724,14 +925,40 @@ async def get_execution_plan(work_order_id: str):
     
     materials = safe_query("""
         SELECT mm.description as material, m.quantity_used as recommended_quantity, m.material_price,
+               m.lead_time, mm.id as material_id,
                COALESCE(SUM(inv.stock_available_on_hand), 0) as available_quantity
         FROM task_material_linkage m 
         JOIN work_order_task_item t ON m.work_order_task_item = t.id 
         JOIN material_master mm ON m.material_used = mm.id
         LEFT JOIN on_hand_inventory inv ON inv.material = mm.id
         WHERE t.work_order = ?
-        GROUP BY mm.id, m.quantity_used, m.material_price, mm.description
+        GROUP BY mm.id, m.quantity_used, m.material_price, mm.description, m.lead_time
     """, (work_order_id,))
+
+    # Estimate missing lead times if PR is needed
+    for mat in materials:
+        if mat['available_quantity'] < mat['recommended_quantity'] and mat['lead_time'] is None:
+            log_stage(25, f"Estimating lead time for {mat['material']}")
+            prompt = f"Estimate the typical industrial lead time in days for obtaining the following material for an aluminum smelter: '{mat['material']}'. Return ONLY a single integer representing the number of days."
+            try:
+                lt_str = generate_with_retry(prompt=prompt)
+                # Extract digits
+                lt = int(''.join(filter(str.isdigit, lt_str)))
+                mat['lead_time'] = lt
+                # Persist to DB
+                conn = sqlite3.connect(settings.db_path)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE task_material_linkage 
+                    SET lead_time = ? 
+                    WHERE material_used = ? AND work_order_task_item IN (
+                        SELECT id FROM work_order_task_item WHERE work_order = ?
+                    )
+                """, (lt, mat['material_id'], work_order_id))
+                conn.commit()
+                conn.close()
+            except:
+                mat['lead_time'] = 7 # Default fallback
     
     manpower = safe_query("""
         SELECT p.technician_engineer_engaged as technician_id,
@@ -844,6 +1071,12 @@ async def get_execution_plan(work_order_id: str):
         JOIN work_order_task_item t ON wp.work_order_task_item = t.id
         WHERE t.work_order = ?
     """, (work_order_id,))
+
+    # Enforce Rule: Status cannot be 'Unavailable' if it is issued (dates available)
+    for wp in work_permits:
+        if wp.get('work_permit_open_day') and wp.get('work_permit_end_day'):
+            if wp.get('status') == 'Unavailable':
+                wp['status'] = 'Available'
     
     # ── Live Auto-Closure Rule ────────────────────────────────────────────────
     # If the last task item's finish datetime < now and WO is still Pending/Approved,
@@ -1213,6 +1446,7 @@ async def generate_purchase_requisition(data: dict):
         return {
             "pr_number": f"PR-{wo_id[-4:]}-2026",
             "requester_department": "Maintenance Division",
+
             "justification": f"Urgent replacement of {material} to restore {asset_name} operational integrity.",
             "technical_specifications": "Standard industrial grade specifications for aluminum smelter environments.",
             "vendor_recommendations": ["Global Industrial Supplies", "Vedanta Approved Local Vendors"],
@@ -1278,6 +1512,170 @@ async def download_pr_docx(data: dict):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename=\"PurchaseRequisition_{pr_no}.docx\""}
     )
+
+class UpdateLeadTimeRequest(BaseModel):
+    material_id: str
+    lead_time: int
+
+@app.post("/api/work-order/{wo_id}/update-material-lead-time")
+async def update_material_lead_time(wo_id: str, payload: UpdateLeadTimeRequest):
+    conn = sqlite3.connect(settings.db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE task_material_linkage 
+        SET lead_time = ? 
+        WHERE material_used = ? AND work_order_task_item IN (
+            SELECT id FROM work_order_task_item WHERE work_order = ?
+        )
+    """, (payload.lead_time, payload.material_id, wo_id))
+    conn.commit()
+    conn.close()
+    
+    # Reschedule the work order
+    new_date = reschedule_work_order(wo_id)
+    return {"status": "success", "new_date": new_date}
+
+@app.get("/api/inventory/summary")
+async def get_inventory_summary():
+    conn = sqlite3.connect(settings.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # 1. Total Value in INR
+    cursor.execute("""
+        SELECT SUM(oh.stock_available_on_hand * mp.price_per_unit) as total_value
+        FROM on_hand_inventory oh
+        JOIN material_price mp ON oh.material = mp.material
+    """)
+    total_value = cursor.fetchone()['total_value'] or 0
+    
+    # 2. Pending PR Count
+    cursor.execute("SELECT COUNT(*) as count FROM purchase_requisition WHERE LOWER(status) = 'pending'")
+    pending_pr_count = cursor.fetchone()['count'] or 0
+    
+    # 3. Critical Spares Out of Stock (Spares with 0 stock)
+    cursor.execute("""
+        SELECT COUNT(DISTINCT mm.id) as count
+        FROM material_master mm
+        JOIN on_hand_inventory oh ON mm.id = oh.material
+        WHERE mm.material_type = 'Spares' AND oh.stock_available_on_hand <= 0
+    """)
+    critical_oos_count = cursor.fetchone()['count'] or 0
+    
+    # 4. Obsolescence Count
+    cursor.execute("""
+        SELECT oh.receipt_date, mm.shelf_life
+        FROM on_hand_inventory oh
+        JOIN material_master mm ON oh.material = mm.id
+        WHERE mm.shelf_life IS NOT NULL AND oh.receipt_date IS NOT NULL
+    """)
+    rows = cursor.fetchall()
+    obsolescence_count = 0
+    from datetime import datetime, timedelta
+    today = datetime.now()
+    threshold = today + timedelta(days=30)
+    
+    for row in rows:
+        try:
+            r_date = datetime.strptime(row['receipt_date'], "%d-%m-%y")
+            expiry_date = r_date + timedelta(days=row['shelf_life'])
+            if expiry_date <= threshold:
+                obsolescence_count += 1
+        except:
+            continue
+
+    conn.close()
+    return {
+        "total_value_inr": total_value,
+        "pending_pr_count": pending_pr_count,
+        "critical_oos_count": critical_oos_count,
+        "obsolescence_count": obsolescence_count
+    }
+
+@app.get("/api/inventory/pending-prs")
+async def get_pending_prs():
+    conn = sqlite3.connect(settings.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT 
+            pr.id, 
+            mm.description as material_name, 
+            pr.status,
+            mp.price_per_unit as unit_price
+        FROM purchase_requisition pr
+        JOIN material_master mm ON pr.material = mm.id
+        LEFT JOIN material_price mp ON mm.id = mp.id
+        WHERE LOWER(pr.status) = 'pending'
+    """)
+    prs = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return prs
+
+@app.get("/api/inventory/critical-spares-oos")
+async def get_critical_spares_oos():
+    conn = sqlite3.connect(settings.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Find spares with 0 stock, related asset, and PR status
+    cursor.execute("""
+        SELECT 
+            mm.id as material_id,
+            mm.description as material_name,
+            oh.stock_available_on_hand as stock,
+            a.name as asset_name,
+            a.id as asset_id,
+            (SELECT status FROM purchase_requisition WHERE material = mm.id LIMIT 1) as pr_status
+        FROM material_master mm
+        JOIN on_hand_inventory oh ON mm.id = oh.material
+        LEFT JOIN task_material_linkage tml ON mm.id = tml.material_used
+        LEFT JOIN work_order_task_item woti ON tml.work_order_task_item = woti.id
+        LEFT JOIN asset a ON woti.asset = a.id
+        WHERE mm.material_type = 'Spares' AND oh.stock_available_on_hand <= 0
+        GROUP BY mm.id
+    """)
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return items
+
+@app.get("/api/inventory/obsolescence")
+async def get_obsolescence_data():
+    conn = sqlite3.connect(settings.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT 
+            oh.material as material_id,
+            mm.description as material_name,
+            oh.receipt_date,
+            mm.shelf_life,
+            oh.stock_available_on_hand as stock
+        FROM on_hand_inventory oh
+        JOIN material_master mm ON oh.material = mm.id
+        WHERE mm.shelf_life IS NOT NULL AND oh.receipt_date IS NOT NULL
+    """)
+    rows = cursor.fetchall()
+    results = []
+    from datetime import datetime, timedelta
+    today = datetime.now()
+    threshold = today + timedelta(days=30)
+    
+    for row in rows:
+        try:
+            r_date = datetime.strptime(row['receipt_date'], "%d-%m-%y")
+            expiry_date = r_date + timedelta(days=row['shelf_life'])
+            if expiry_date <= threshold:
+                item = dict(row)
+                item['expiry_date'] = expiry_date.strftime("%d-%m-%y")
+                item['days_remaining'] = (expiry_date - today).days
+                results.append(item)
+        except:
+            continue
+            
+    conn.close()
+    return results
 
 if __name__ == "__main__":
     import uvicorn

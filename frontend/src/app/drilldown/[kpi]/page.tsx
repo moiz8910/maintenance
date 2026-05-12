@@ -121,9 +121,13 @@ export default function DrilldownPage() {
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} dy={15} />
                       <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
                       <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
-                      <Legend verticalAlign="top" align="right" iconType="circle" />
-                      <Line type="monotone" dataKey="planned" stroke="#0f172a" strokeWidth={3} dot={{r: 4}} />
-                      <Line type="monotone" dataKey="actual" stroke="#6366f1" strokeWidth={3} dot={{r: 6}} />
+                      <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingBottom: '20px' }} />
+                      <Line type="monotone" dataKey="planned" name="Planned" stroke="#0f172a" strokeWidth={3} dot={{r: 4}}>
+                        <LabelList dataKey="planned" position="top" style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
+                      </Line>
+                      <Line type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={3} dot={{r: 6}}>
+                        <LabelList dataKey="actual" position="top" style={{ fill: '#6366f1', fontSize: 10, fontWeight: 700 }} />
+                      </Line>
                     </LineChart>
                   ) : data?.chartType === 'grouped-bar' ? (
                     <BarChart data={data.data}>
@@ -131,9 +135,13 @@ export default function DrilldownPage() {
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} dy={15} />
                       <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
                       <Tooltip contentStyle={{borderRadius: '16px', border: 'none'}} />
-                      <Legend verticalAlign="top" align="right" />
-                      <Bar dataKey={Object.keys(data.data[0])[1]} fill="#0f172a" radius={[6, 6, 0, 0]} />
-                      <Bar dataKey={Object.keys(data.data[0])[2]} fill="#6366f1" radius={[6, 6, 0, 0]} />
+                      <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingBottom: '20px' }} />
+                      <Bar dataKey={Object.keys(data.data[0])[1]} name={Object.keys(data.data[0])[1].toUpperCase()} fill="#0f172a" radius={[6, 6, 0, 0]}>
+                        <LabelList dataKey={Object.keys(data.data[0])[1]} position="top" style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
+                      </Bar>
+                      <Bar dataKey={Object.keys(data.data[0])[2]} name={Object.keys(data.data[0])[2].toUpperCase()} fill="#6366f1" radius={[6, 6, 0, 0]}>
+                        <LabelList dataKey={Object.keys(data.data[0])[2]} position="top" style={{ fill: '#6366f1', fontSize: 10, fontWeight: 700 }} />
+                      </Bar>
                     </BarChart>
                   ) : data?.chartType === 'table' ? (
                     <div className="overflow-hidden border border-slate-100 rounded-2xl">
@@ -157,7 +165,7 @@ export default function DrilldownPage() {
                       </table>
                     </div>
                   ) : (
-                    <BarChart data={data.data} layout={data?.chartType === 'horizontal-bar' ? 'vertical' : 'horizontal'}>
+                    <BarChart data={data.data} layout={data?.chartType === 'horizontal-bar' ? 'vertical' : 'horizontal'} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       {data?.chartType === 'horizontal-bar' ? (
                         <>
@@ -171,8 +179,14 @@ export default function DrilldownPage() {
                         </>
                       )}
                       <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '16px', border: 'none'}} />
-                      <Legend verticalAlign="top" align="right" />
-                      <Bar dataKey={Object.keys(data.data[0])[1] || 'count'} radius={[6, 6, 6, 6]} barSize={32}>
+                      <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingBottom: '20px' }} />
+                      <Bar 
+                        dataKey={Object.keys(data.data[0])[1] || 'count'} 
+                        name={kpi === 'safety-compliance' ? 'Permit Compliance' : (kpi === 'safety-incidents' ? 'Safety Incidents' : (Object.keys(data.data[0])[1] || 'count').toUpperCase())} 
+                        radius={[6, 6, 6, 6]} 
+                        barSize={32}
+                      >
+                        <LabelList dataKey={Object.keys(data.data[0])[1] || 'count'} position={data?.chartType === 'horizontal-bar' ? 'right' : 'top'} style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
                         {data.data.map((entry: any, index: number) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}

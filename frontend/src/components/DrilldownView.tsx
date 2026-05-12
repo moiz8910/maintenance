@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import ExecutionPlanModal from './ExecutionPlanModal';
-import ExecutionAdviseModal from './ExecutionAdviseModal';
+import ExecutionAdviceModal from './ExecutionAdviceModal';
 import { 
   Sparkles, 
   Loader2, 
@@ -10,7 +10,10 @@ import {
   Filter, 
   Download,
   AlertCircle,
-  X
+  X,
+  ChevronUp,
+  ChevronDown,
+  ArrowUpDown
 } from 'lucide-react';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, LabelList 
@@ -24,9 +27,10 @@ interface DrilldownViewProps {
   kpiId: string;
   onClose: () => void;
   initialStatus?: string;
+  viewSource?: 'auto-pilot' | 'coach';
 }
 
-const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialStatus }) => {
+const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialStatus, viewSource }) => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [aiInsight, setAiInsight] = useState('');
@@ -35,8 +39,10 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
   const [selectedStatus, setSelectedStatus] = useState<string | null>(initialStatus || null);
   const [workOrdersData, setWorkOrdersData] = useState<any[]>([]);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | null>(null);
+  const [modalType, setModalType] = useState<'plan' | 'advise'>('plan');
   const [fetchingWo, setFetchingWo] = useState(false);
   const [classFilter, setClassFilter] = useState<string>('All');
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({ key: 'class', direction: 'asc' });
 
   // Auto-fetch work orders if initialStatus is provided
   useEffect(() => {
@@ -46,40 +52,228 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
   }, [initialStatus]);
 
   const handleBarClick = async (entry: any, bypassKpiCheck = false) => {
-    if (!bypassKpiCheck && kpiId !== 'work-order') return;
-    const status = entry.name;
-    setSelectedStatus(status);
+    // Only allow drilldown if kpiId supports it or bypass is true
+    const supported = ['work-order', 'safety-incidents', 'manpower-utilization', 'purchase-requisition'];
+    if (!bypassKpiCheck && !supported.includes(kpiId)) return;
+
+    const value = entry.name;
+    setSelectedStatus(value);
     setFetchingWo(true);
     try {
-      const url = status === 'All' ? '/api/work-orders' : `/api/work-orders?status=${status}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      
-      // Sort: Class (A > B > C) as primary, Date (Oldest > Newest) as secondary
-      const sorted = (json || []).sort((a: any, b: any) => {
-        // Class sorting
-        const classOrder: Record<string, number> = { 'Class A': 1, 'Class B': 2, 'Class C': 3, 'A': 1, 'B': 2, 'C': 3 };
-        const orderA = classOrder[a.class] || 99;
-        const orderB = classOrder[b.class] || 99;
-        
-        if (orderA !== orderB) return orderA - orderB;
+      let url = '';
+      if (kpiId === 'work-order') {
+        url = value === 'All' ? '/api/work-orders' : `/api/work-orders?status=${value}`;
+      } else if (kpiId === 'safety-incidents') {
+        url = `/api/drilldown/safety-incidents?filter=${value}`;
+      } else if (kpiId === 'safety-compliance') {
+        url = `/api/drilldown/safety-compliance?filter=${value}`;
+      } else if (kpiId === 'manpower-utilization') {
+        url = `/api/drilldown/manpower-utilization?filter=${value}`;
+      } else if (kpiId === 'purchase-requisition') {
+        url = `/api/drilldown/purchase-requisition?filter=${value}`;
+      }
 
-        // Date sorting (secondary)
-        if (!a.date || !b.date) return 0;
-        const [d1, m1, y1] = a.date.split('-').map(Number);
-        const [d2, m2, y2] = b.date.split('-').map(Number);
-        const date1 = new Date(2000 + y1, m1 - 1, d1).getTime();
-        const date2 = new Date(2000 + y2, m2 - 1, d2).getTime();
-        return date1 - date2;
-      });
-      
-      setWorkOrdersData(sorted);
+      if (url) {
+        const res = await fetch(url);
+        const json = await res.json();
+        setWorkOrdersData(json || []);
+      }
     } catch (e) {
       console.error(e);
     } finally {
       setFetchingWo(false);
     }
   };
+
+  // Helper to render table headers based on KPI
+  const renderTableHeaders = () => {
+    if (kpiId === 'work-order') {
+      return (
+        <>
+          <th onClick={() => requestSort('id')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+            <div className="flex items-center gap-1">ID {sortConfig?.key === 'id' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+          </th>
+          <th onClick={() => requestSort('date')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+            <div className="flex items-center gap-1">WO open date {sortConfig?.key === 'date' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+          </th>
+          <th onClick={() => requestSort('schedule_date')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+            <div className="flex items-center gap-1">Schedule date {sortConfig?.key === 'schedule_date' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+          </th>
+          <th onClick={() => requestSort('class')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+            <div className="flex items-center gap-1">Class {sortConfig?.key === 'class' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+          </th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Description</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Actions</th>
+        </>
+      );
+    }
+    if (kpiId === 'safety-incidents') {
+      return (
+        <>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">ID</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Type</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Work Order</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Asset</th>
+        </>
+      );
+    }
+    if (kpiId === 'manpower-utilization') {
+      return (
+        <>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Name</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Role</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Discipline</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Hourly Rate</th>
+        </>
+      );
+    }
+    if (kpiId === 'purchase-requisition') {
+      return (
+        <>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">PR ID</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Material</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Quantity</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Status</th>
+        </>
+      );
+    }
+    if (kpiId === 'safety-compliance') {
+      return (
+        <>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Permit ID</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Work Order</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Asset</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Type</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Status</th>
+        </>
+      );
+    }
+    return null;
+  };
+
+  // Helper to render table rows based on KPI
+  const renderTableRows = (row: any, i: number) => {
+    if (kpiId === 'work-order') {
+      return (
+        <tr key={i} className="hover:bg-indigo-50/50 cursor-pointer transition-colors group" onClick={() => { setSelectedWorkOrder(row.id); setModalType(viewSource === 'coach' ? 'advise' : 'plan'); }}>
+          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600 group-hover:text-indigo-700 transition-colors">{row.id}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-500 whitespace-nowrap">{row.date || '—'}</td>
+          <td className="px-4 py-3 text-[10px] font-black text-indigo-600 whitespace-nowrap">{row.schedule_date || '—'}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-700">
+            <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{row.class}</span>
+          </td>
+          <td className="px-4 py-3 text-[10px] text-slate-600 max-w-[260px] truncate" title={row.description}>{row.description}</td>
+          <td className="px-4 py-3 text-[10px] font-bold">
+            <span className={`px-2 py-1 rounded-full font-black ${statusBadge(row.status)} hover:ring-2 hover:ring-indigo-300 transition-all cursor-pointer`}>{viewSource === 'coach' ? 'Execution Advice' : 'Execution Plan'}</span>
+          </td>
+        </tr>
+      );
+    }
+    if (kpiId === 'safety-incidents') {
+      return (
+        <tr key={i} className="hover:bg-slate-50 transition-colors">
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-900">{row.id || '—'}</td>
+          <td className="px-4 py-3 text-[10px] font-black text-rose-600 uppercase tracking-widest">{row.incident_type}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600">{row.work_order || '—'}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-600">{row.asset || '—'}</td>
+        </tr>
+      );
+    }
+    if (kpiId === 'manpower-utilization') {
+      return (
+        <tr key={i} className="hover:bg-slate-50 transition-colors">
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-900">{row.name}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-600">{row.role}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600">{row.discipline}</td>
+          <td className="px-4 py-3 text-[10px] font-black text-slate-900 text-right">₹{row.rate}/hr</td>
+        </tr>
+      );
+    }
+    if (kpiId === 'purchase-requisition') {
+      return (
+        <tr key={i} className="hover:bg-slate-50 transition-colors">
+          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600">{row.id}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-700">{row.material}</td>
+          <td className="px-4 py-3 text-[10px] font-black text-slate-900 text-right">{row.quantity}</td>
+          <td className="px-4 py-3 text-center">
+            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${row.status.toLowerCase() === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+              {row.status}
+            </span>
+          </td>
+        </tr>
+      );
+    }
+    if (kpiId === 'safety-compliance') {
+      return (
+        <tr key={i} className="hover:bg-slate-50 transition-colors">
+          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600">{row.id}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-900">{row.work_order}</td>
+          <td className="px-4 py-3 text-[10px] font-bold text-slate-600">{row.asset}</td>
+          <td className="px-4 py-3 text-[10px] font-black text-amber-600 uppercase tracking-widest">{row.type}</td>
+          <td className="px-4 py-3 text-center">
+            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${row.status.toLowerCase() === 'approved' || row.status.toLowerCase() === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+              {row.status}
+            </span>
+          </td>
+        </tr>
+      );
+    }
+    return null;
+  };
+
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const sortedWorkOrders = React.useMemo(() => {
+    const sortableItems = [...workOrdersData];
+    if (sortConfig !== null) {
+      sortableItems.sort((a, b) => {
+        const { key, direction } = sortConfig;
+        let valA = a[key];
+        let valB = b[key];
+
+        // Custom sorting for ID (numeric part)
+        if (key === 'id') {
+          const numA = parseInt(String(valA || '').replace(/\D/g, '') || '0') || 0;
+          const numB = parseInt(String(valB || '').replace(/\D/g, '') || '0') || 0;
+          return direction === 'asc' ? numA - numB : numB - numA;
+        }
+
+        // Custom sorting for Class
+        if (key === 'class') {
+          const classOrder: Record<string, number> = { 'Class A': 1, 'Class B': 2, 'Class C': 3, 'A': 1, 'B': 2, 'C': 3 };
+          const orderA = classOrder[valA] || 99;
+          const orderB = classOrder[valB] || 99;
+          return direction === 'asc' ? orderA - orderB : orderB - orderA;
+        }
+
+        // Custom sorting for Date
+        if (key === 'date' || key === 'schedule_date') {
+          const parseDate = (d: string) => {
+            if (!d || d === '—') return 0;
+            const parts = d.split('-');
+            if (parts.length !== 3) return 0;
+            const [dd, mm, yy] = parts.map(Number);
+            return new Date(2000 + yy, mm - 1, dd).getTime();
+          };
+          const dateA = parseDate(valA);
+          const dateB = parseDate(valB);
+          return direction === 'asc' ? dateA - dateB : dateB - dateA;
+        }
+
+        // Default string comparison
+        if (valA < valB) return direction === 'asc' ? -1 : 1;
+        if (valA > valB) return direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [workOrdersData, sortConfig]);
 
   const statusBadge = (status: string) => {
     const s = (status || '').toLowerCase();
@@ -156,12 +350,10 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
     <div className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-black text-slate-900 capitalize tracking-tight">
-            {kpiId.replace(/-/g, ' ')} Deep-Dive
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+            {viewSource === 'coach' ? 'Work Order Execution Advice' : `${kpiId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} Deep Dive`}
           </h2>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
-            Real-time Analytical Engine
-          </p>
+
         </div>
         <button 
           onClick={onClose}
@@ -173,30 +365,29 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
 
       <div className="flex flex-col gap-6">
         <div className="w-full space-y-6">
-          <div className={selectedStatus ? "modular-container" : "modular-container h-[400px]"}>
+          <div className={selectedStatus ? "modular-container min-h-[400px]" : "modular-container h-[400px]"}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                {selectedStatus ? `${selectedStatus} Work Orders` : data?.title}
+                {viewSource === 'coach' ? 'List of Work Orders' : (selectedStatus ? `${selectedStatus} Details` : data?.title)}
               </h3>
               <div className="flex gap-2">
                 {selectedStatus ? (
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filter:</span>
-                      <select 
-                        value={classFilter}
-                        onChange={(e) => setClassFilter(e.target.value)}
-                        className="bg-transparent text-[10px] font-bold text-slate-700 focus:outline-none cursor-pointer"
-                      >
-                        <option value="All">All Classes</option>
-                        <option value="Class A">Class A</option>
-                        <option value="Class B">Class B</option>
-                        <option value="Class C">Class C</option>
-                      </select>
-                    </div>
-                    <button onClick={() => handleBarClick({ name: 'All' }, true)} className="text-[10px] text-slate-600 font-black uppercase tracking-widest px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
-                      All Orders
-                    </button>
+                    {kpiId === 'work-order' && (
+                      <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filter:</span>
+                        <select 
+                          value={classFilter}
+                          onChange={(e) => setClassFilter(e.target.value)}
+                          className="bg-transparent text-[10px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                        >
+                          <option value="All">All Classes</option>
+                          <option value="Class A">Class A</option>
+                          <option value="Class B">Class B</option>
+                          <option value="Class C">Class C</option>
+                        </select>
+                      </div>
+                    )}
                     <button onClick={() => setSelectedStatus(null)} className="text-[10px] text-indigo-600 font-black uppercase tracking-widest px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors">
                       &larr; Back to Chart
                     </button>
@@ -226,39 +417,19 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
               fetchingWo ? (
                 <div className="flex items-center justify-center py-16"><Loader2 className="animate-spin text-indigo-600" size={24} /></div>
               ) : (
-                <div className="overflow-auto rounded-xl border border-slate-100 bg-white">
+                <div className="rounded-xl border border-slate-100 bg-white overflow-hidden shadow-sm">
                   <table className="w-full text-left">
                     <thead className="bg-slate-50 sticky top-0 shadow-sm">
                       <tr>
-                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">ID</th>
-                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">WO open date</th>
-                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Class</th>
-                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Description</th>
-                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Status</th>
-                        <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Plan</th>
+                        {renderTableHeaders()}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {workOrdersData
-                        .filter(row => classFilter === 'All' || row.class === classFilter || (classFilter === 'Class A' && row.class === 'A') || (classFilter === 'Class B' && row.class === 'B') || (classFilter === 'Class C' && row.class === 'C'))
-                        .map((row: any, i: number) => (
-                        <tr key={i} className="hover:bg-indigo-50/50 cursor-pointer transition-colors group" onClick={() => setSelectedWorkOrder(row.id)}>
-                          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600 group-hover:text-indigo-700 transition-colors">{row.id}</td>
-                          <td className="px-4 py-3 text-[10px] font-bold text-slate-500 whitespace-nowrap">{row.date || '—'}</td>
-                          <td className="px-4 py-3 text-[10px] font-bold text-slate-700">
-                            <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{row.class}</span>
-                          </td>
-                          <td className="px-4 py-3 text-[10px] text-slate-600 max-w-[260px] truncate" title={row.description}>{row.description}</td>
-                          <td className="px-4 py-3 text-[10px] font-bold">
-                            <span className={`px-2 py-1 rounded-full font-black ${statusBadge(row.status)}`}>{row.status}</span>
-                          </td>
-                          <td className="px-4 py-3 text-[10px]">
-                            <span className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold group-hover:bg-indigo-700 transition-colors">Execution Advise →</span>
-                          </td>
-                        </tr>
-                      ))}
+                      {sortedWorkOrders
+                        .filter(row => kpiId !== 'work-order' || classFilter === 'All' || row.class === classFilter || (classFilter === 'Class A' && row.class === 'A') || (classFilter === 'Class B' && row.class === 'B') || (classFilter === 'Class C' && row.class === 'C'))
+                        .map((row: any, i: number) => renderTableRows(row, i))}
                       {workOrdersData.length === 0 && (
-                        <tr><td colSpan={5} className="px-4 py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">No work orders found.</td></tr>
+                        <tr><td colSpan={10} className="px-4 py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">No data found for this selection.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -306,7 +477,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                   </Bar>
                 </BarChart>
               ) : data?.chartType === 'table' ? (
-                <div className="overflow-auto h-full rounded-xl border border-slate-50">
+                <div className="rounded-xl border border-slate-50">
                   <table className="w-full text-left">
                     <thead className="bg-slate-50 sticky top-0">
                       <tr>
@@ -327,7 +498,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                   </table>
                 </div>
               ) : (
-                <BarChart data={chartData} layout={data?.chartType === 'horizontal-bar' ? 'vertical' : 'horizontal'}>
+                <BarChart data={chartData} layout={data?.chartType === 'horizontal-bar' ? 'vertical' : 'horizontal'} margin={{ top: 20, right: 30, left: 10, bottom: 30 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   {data?.chartType === 'horizontal-bar' ? (
                     <>
@@ -342,11 +513,24 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                   )}
                   <Tooltip cursor={{fill: '#f8fafc'}} />
                   <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
-                  <Bar dataKey={Object.keys(chartData[0] || {})[1] || 'count'} name={capitalize(Object.keys(chartData[0] || {})[1] || 'count')} radius={[4, 4, 4, 4]} barSize={24} onClick={handleBarClick}>
+                  <Bar 
+                    dataKey={Object.keys(chartData[0] || {})[1] || 'count'} 
+                    name={kpiId === 'safety-compliance' ? 'Permit Compliance' : (kpiId === 'safety-incidents' ? 'Safety Incidents' : capitalize(Object.keys(chartData[0] || {})[1] || 'count'))} 
+                    radius={[4, 4, 4, 4]} 
+                    barSize={24} 
+                    onClick={handleBarClick}
+                  >
                     <LabelList dataKey={Object.keys(chartData[0] || {})[1] || 'count'} position={data?.chartType === 'horizontal-bar' ? "right" : "top"} style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
-                    {chartData.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} cursor={kpiId === 'work-order' ? 'pointer' : 'default'} />
-                    ))}
+                    {chartData.map((entry: any, index: number) => {
+                      const supported = ['work-order', 'safety-incidents', 'manpower-utilization', 'purchase-requisition'];
+                      return (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={COLORS[index % COLORS.length]} 
+                          cursor={supported.includes(kpiId) ? 'pointer' : 'default'} 
+                        />
+                      );
+                    })}
                   </Bar>
                 </BarChart>
               )}
@@ -392,8 +576,8 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
         </div>
       </div>
 
-      {selectedWorkOrder && kpiId === 'work-order' && initialStatus === 'Pending' ? (
-        <ExecutionAdviseModal 
+      {selectedWorkOrder && kpiId === 'work-order' && initialStatus === 'Pending' && modalType === 'advise' ? (
+        <ExecutionAdviceModal 
           workOrderId={selectedWorkOrder} 
           onClose={() => setSelectedWorkOrder(null)} 
         />

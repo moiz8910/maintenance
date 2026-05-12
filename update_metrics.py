@@ -30,36 +30,36 @@ def update_data():
     print(f"Allocated {sum(hours_list)} hours of unplanned downtime across {len(selected_assets)} random assets.")
 
     # 2. Safety Statistics: 8 incidents, LTI is minimum 1
+    try:
+        cursor.execute("ALTER TABLE incident_events ADD COLUMN incident_type TEXT")
+    except:
+        pass # Already exists
+        
     cursor.execute("DELETE FROM incident_events")
     
+    # Fetch some real WOs and Assets for linkage from task items
+    cursor.execute("SELECT work_order, asset FROM work_order_task_item LIMIT 30")
+    wo_pool = cursor.fetchall()
+    
+    if not wo_pool:
+        # Fallback if task items are empty
+        wo_pool = [('WO-0001', 'AST-0101')]
+    
+    incidents_data = []
     types = ['Near Miss', 'LTI', 'First Aid']
     
-    incidents = ['LTI'] # Guarantee at least 1 LTI
-    for _ in range(7):
-        incidents.append(random.choice(types))
+    # Guarantee 8 incidents with real linkages
+    for i in range(1, 9):
+        wo_id, asset_id = random.choice(wo_pool)
+        inc_type = 'LTI' if i == 1 else random.choice(types)
+        incidents_data.append((f'INC-2024-00{i}', wo_id, asset_id, inc_type))
         
-    # Dynamically find the correct column name for "incident type"
-    cursor.execute("PRAGMA table_info(incident_events)")
-    columns = [row[1] for row in cursor.fetchall()]
-    
-    type_col = None
-    for possible_name in ['incident_type', 'type', 'event_type', 'incident_category', 'category', 'incident_class']:
-        if possible_name in columns:
-            type_col = possible_name
-            break
-            
-    if not type_col:
-        # Fallback if no specific column is found, just insert into the first available string column
-        type_col = columns[1] if len(columns) > 1 else columns[0]
-
-    for i, inc_type in enumerate(incidents):
-        cursor.execute(f"""
-            INSERT INTO incident_events ({type_col}) VALUES (?)
-        """, (inc_type,))
+    for row in incidents_data:
+        cursor.execute("INSERT INTO incident_events (id, work_order, asset, incident_type) VALUES (?, ?, ?, ?)", row)
         
     conn.commit()
     conn.close()
-    print("Allocated 8 safety incidents (Near Miss, LTI, First Aid).")
+    print(f"Allocated {len(incidents_data)} safety incidents with real WO/Asset linkages.")
     print("Database update complete!")
 
 if __name__ == "__main__":
