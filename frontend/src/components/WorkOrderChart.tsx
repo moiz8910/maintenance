@@ -18,7 +18,7 @@ import { Filter, MoreHorizontal, Download } from 'lucide-react';
 const COLORS = ['#0f172a', '#6366f1', '#10b981'];
 
 const WorkOrderChart = () => {
-  const { workOrders } = useStore();
+  const { workOrders, setActiveKpi } = useStore();
 
   React.useEffect(() => {
     console.log("[Stage 7] Work Order Status Chart Mounted");
@@ -67,6 +67,7 @@ const WorkOrderChart = () => {
             />
             <Tooltip 
               cursor={{ fill: '#f8fafc' }}
+              labelFormatter={() => ''}
               contentStyle={{ 
                 borderRadius: '16px', 
                 border: 'none', 
@@ -77,8 +78,26 @@ const WorkOrderChart = () => {
               }}
             />
             <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
-            <Bar dataKey="count" name="Count" radius={[12, 12, 0, 0]} barSize={48}>
-              <LabelList dataKey="count" position="top" style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
+            <Bar 
+              dataKey="count" 
+              name="Count" 
+              radius={[12, 12, 0, 0]} 
+              barSize={48}
+              onClick={(entry) => {
+                console.log("[Stage 8] Chart Drilldown triggered for:", entry.name);
+                if (entry.name === 'Pending') setActiveKpi('pending-work-orders');
+                else if (entry.name === 'In Progress') setActiveKpi('work-order-in-progress');
+                else if (entry.name === 'Completed YTD' || entry.name === 'Closed') setActiveKpi('work-order-closed');
+                else setActiveKpi('work-order');
+              }}
+              className="cursor-pointer"
+            >
+              <LabelList 
+                dataKey="count" 
+                position="top" 
+                style={{ fill: '#1e293b', fontSize: 11, fontWeight: 900 }} 
+                offset={10}
+              />
               {data.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
@@ -89,16 +108,14 @@ const WorkOrderChart = () => {
 
       <div className="mt-6 pt-6 border-t border-slate-50 flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-slate-900" />
-            <span>Critical</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-indigo-500" />
-            <span>Active</span>
-          </div>
+          {data.map((entry, index) => (
+            <div key={index} className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+              <span>{entry.name}</span>
+            </div>
+          ))}
         </div>
-        <button className="text-indigo-600 hover:underline">View All Orders</button>
+        <button onClick={() => setActiveKpi('work-order')} className="text-indigo-600 hover:underline">View All Orders</button>
       </div>
     </div>
   );

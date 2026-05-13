@@ -36,10 +36,27 @@ def convert():
         cursor.execute("PRAGMA table_info(work_permit)")
         cols = [c[1] for c in cursor.fetchall()]
         if 'status' not in cols:
-            cursor.execute("ALTER TABLE work_permit ADD COLUMN status TEXT DEFAULT 'Unavailable'")
+            cursor.execute("ALTER TABLE work_permit ADD COLUMN status TEXT DEFAULT 'Active'")
+        # Set all to active for now as per Rule 13 requirement to show only active
+        cursor.execute("UPDATE work_permit SET status = 'Active'")
+        
         if 'status_change_timestamp' not in cols:
             cursor.execute("ALTER TABLE work_permit ADD COLUMN status_change_timestamp TEXT")
+
+        # Ensure work_order table has required columns
+        cursor.execute("PRAGMA table_info(work_order)")
+        wo_cols = [c[1] for c in cursor.fetchall()]
+        if 'asset_id' not in wo_cols:
+            cursor.execute("ALTER TABLE work_order ADD COLUMN asset_id TEXT")
+        if 'key_insights' not in wo_cols:
+            cursor.execute("ALTER TABLE work_order ADD COLUMN key_insights TEXT")
             
+        # Ensure task_material_linkage has lead_time
+        cursor.execute("PRAGMA table_info(task_material_linkage)")
+        tml_cols = [c[1] for c in cursor.fetchall()]
+        if 'lead_time' not in tml_cols:
+            cursor.execute("ALTER TABLE task_material_linkage ADD COLUMN lead_time INTEGER")
+
         conn.commit()
     except Exception as e:
         print("Could not adjust database schema:", e)

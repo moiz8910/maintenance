@@ -120,7 +120,10 @@ export default function DrilldownPage() {
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} dy={15} />
                       <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
-                      <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                      <Tooltip 
+                        labelFormatter={() => ''}
+                        contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
+                      />
                       <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingBottom: '20px' }} />
                       <Line type="monotone" dataKey="planned" name="Planned" stroke="#0f172a" strokeWidth={3} dot={{r: 4}}>
                         <LabelList dataKey="planned" position="top" style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
@@ -134,7 +137,10 @@ export default function DrilldownPage() {
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} dy={15} />
                       <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
-                      <Tooltip contentStyle={{borderRadius: '16px', border: 'none'}} />
+                      <Tooltip 
+                        labelFormatter={() => ''}
+                        contentStyle={{borderRadius: '16px', border: 'none'}} 
+                      />
                       <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingBottom: '20px' }} />
                       <Bar dataKey={Object.keys(data.data[0])[1]} name={Object.keys(data.data[0])[1].toUpperCase()} fill="#0f172a" radius={[6, 6, 0, 0]}>
                         <LabelList dataKey={Object.keys(data.data[0])[1]} position="top" style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
@@ -178,7 +184,11 @@ export default function DrilldownPage() {
                           <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
                         </>
                       )}
-                      <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '16px', border: 'none'}} />
+                      <Tooltip 
+                        cursor={{fill: '#f8fafc'}} 
+                        labelFormatter={() => ''}
+                        contentStyle={{borderRadius: '16px', border: 'none'}} 
+                      />
                       <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingBottom: '20px' }} />
                       <Bar 
                         dataKey={Object.keys(data.data[0])[1] || 'count'} 

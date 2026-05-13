@@ -6,8 +6,8 @@ def assign_permits():
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # 1. Get all work orders (not just pending, to handle 'Closed' ones too)
-    cursor.execute("SELECT id, work_order_status, work_order_open_time FROM work_order")
+    # 1. Get all work orders
+    cursor.execute("SELECT id, work_order_status, work_order_open_time, work_order_open_day FROM work_order")
     all_wos = cursor.fetchall()
     total_wos = len(all_wos)
     
@@ -15,7 +15,7 @@ def assign_permits():
         print("No work orders found.")
         return
 
-    # 2. Select 80% to have permits (using same logic but for all)
+    # 2. Select 80% to have permits
     num_with_permits = int(total_wos * 0.8)
     wos_to_permit = random.sample([row[0] for row in all_wos], num_with_permits)
     
@@ -30,47 +30,68 @@ def assign_permits():
         wo_info = next(row for row in all_wos if row[0] == wo_id)
         wo_status = (wo_info[1] or "").lower()
         wo_open_time = wo_info[2] or "08:00"
+        wo_open_day = wo_info[3] or "01-05-26"
 
-        # Get the first task item for this WO
-        cursor.execute("SELECT id FROM work_order_task_item WHERE work_order = ? LIMIT 1", (wo_id,))
-        task_item = cursor.fetchone()
-        if not task_item:
+        # Get the first and last task items for this WO to set permit duration
+        cursor.execute("""
+            SELECT id, work_order_task_item_open_day, work_order_task_item_open_time,
+                   work_order_task_item_finish_day, work_order_task_item_finish_time
+            FROM work_order_task_item 
+            WHERE work_order = ?
+            ORDER BY work_order_task_item_open_day ASC, work_order_task_item_open_time ASC
+        """, (wo_id,))
+        tasks = cursor.fetchall()
+        if not tasks:
             continue
             
-        task_item_id = task_item[0]
+        first_task = tasks[0]
+        last_task = tasks[-1]
+        task_item_id = first_task[0]
+        
+        # Rule 7.3: Start time cannot be earlier than work order open time
+        p_open_day = wo_open_day
+        p_open_time = wo_open_time
+        
+        # Rule 7.2: End of work permit should be 15-20 minutes more than the last task item close time
+        p_end_day = last_task[3]
+        last_finish_time = last_task[4] or "17:00"
+        try:
+            h, m = map(int, last_finish_time.split(':'))
+            m += random.randint(15, 20)
+            if m >= 60:
+                h += 1
+                m -= 60
+            p_end_time = f"{h:02d}:{m:02d}"
+        except:
+            p_end_time = last_finish_time
+
         permit_id = f"WP-{wo_id[-4:]}-{i+1}"
         p_type = random.choice(permit_types)
         desc = f"Permit for {p_type} on {wo_id}"
         
-        # Rule: No work order can be closed without the permit status as unavailable. 
-        # The permit status should be changed to available as it is closed.
-        # This implies: If WO is Closed -> Permit is Available.
-        # For Open (Pending) WOs -> Can be Available or Unavailable.
-        
         if wo_status == "closed":
             p_status = "Available"
         else:
-            # 75% chance of being Available to meet the "at least 70%" requirement
             p_status = "Available" if random.random() < 0.75 else "Unavailable"
         
-        # Rule: Time stamp should be within 1 hour of work order open time stamp.
-        status_ts = None
-        if p_status == "Available":
-            try:
-                h, m = map(int, wo_open_time.split(':'))
-                # Add random minutes (0 to 59)
-                m += random.randint(0, 59)
-                if m >= 60:
-                    h += 1
-                    m -= 60
-                status_ts = f"{h:02d}:{m:02d}"
-            except:
-                status_ts = wo_open_time
+        # Rule: Status change timestamp should be within 1 hour of work order open time
+        try:
+            h, m = map(int, wo_open_time.split(':'))
+            m += random.randint(0, 59)
+            if m >= 60:
+                h += 1
+                m -= 60
+            status_ts = f"{h:02d}:{m:02d}"
+        except:
+            status_ts = wo_open_time
 
         cursor.execute("""
-            INSERT INTO work_permit (id, work_order_task_item, description, type, status, status_change_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (permit_id, task_item_id, desc, p_type, p_status, status_ts))
+            INSERT INTO work_permit (id, work_order_task_item, description, type, status, status_change_timestamp,
+                                    work_permit_open_day, work_permit_open_time, 
+                                    work_permit_end_day, work_permit_end_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (permit_id, task_item_id, desc, p_type, p_status, status_ts, 
+              p_open_day, p_open_time, p_end_day, p_end_time))
 
     conn.commit()
     conn.close()

@@ -112,15 +112,31 @@ def apply_rules():
         else:
             permit_ts = "07:30"   # safe fallback
 
+        # Calculate permit end time: closure_time + 15-20 mins (Rule 7.2)
+        p_end_time = closure_time
+        try:
+            h, m = map(int, closure_time.split(':'))
+            m += random.randint(15, 20)
+            if m >= 60:
+                h += 1
+                m -= 60
+            p_end_time = f"{h:02d}:{m:02d}"
+        except:
+            pass
+
         # Update permits linked to this WO
         cursor.execute("""
             UPDATE work_permit
             SET status = 'Available',
-                status_change_timestamp = ?
+                status_change_timestamp = ?,
+                work_permit_open_day = ?,
+                work_permit_open_time = ?,
+                work_permit_end_day = ?,
+                work_permit_end_time = ?
             WHERE work_order_task_item IN (
                 SELECT id FROM work_order_task_item WHERE work_order = ?
             )
-        """, (permit_ts, wo_id))
+        """, (permit_ts, wo_row['work_order_open_day'], wo_row['work_order_open_time'], closure_day, p_end_time, wo_id))
 
         affected = cursor.rowcount
         print(f"           Permits updated: {affected}  (timestamp: {permit_ts})")
@@ -151,14 +167,43 @@ def apply_rules():
         else:
             ts = "07:30"
 
+        # Calculate permit end time: closure_time + 15-20 mins (Rule 7.2)
+        p_end_time = closure_time
+        try:
+            h, m = map(int, closure_time.split(':'))
+            m += random.randint(15, 20)
+            if m >= 60:
+                h += 1
+                m -= 60
+            p_end_time = f"{h:02d}:{m:02d}"
+        except:
+            pass
+
+        # ── Update permit status and times ──────────────────────────────────
         cursor.execute("""
             UPDATE work_permit
             SET status = 'Available',
-                status_change_timestamp = ?
+                status_change_timestamp = ?,
+                work_permit_open_day = ?,
+                work_permit_open_time = ?,
+                work_permit_end_day = ?,
+                work_permit_end_time = ?
             WHERE work_order_task_item IN (
                 SELECT id FROM work_order_task_item WHERE work_order = ?
             )
-        """, (ts, wid))
+        """, (ts, row['work_order_open_day'], row['work_order_open_time'], closure_day, p_end_time, wid))
+
+    # ── 4. Global Rule 7 Audit: Status cannot be 'Unavailable' if dates are present ──
+    cursor.execute("""
+        UPDATE work_permit 
+        SET status = 'Available' 
+        WHERE status = 'Unavailable' 
+          AND work_permit_open_day IS NOT NULL 
+          AND work_permit_open_day != ''
+          AND work_permit_end_day IS NOT NULL 
+          AND work_permit_end_day != ''
+    """)
+    print(f"Global Audit: Updated {cursor.rowcount} permits to Available due to date presence.")
 
     conn.commit()
     conn.close()

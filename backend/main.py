@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from services.kpi_engine import get_all_kpis
 from services.drilldown_engine import get_drilldown_data, safe_query
 from services.agent_manager import run_maintenance_assistant, run_agent_workflow, generate_with_retry
+from services.rule_10_processor import process_work_order_resources
 from services.scheduling_engine import reschedule_work_order
 from lookup_router import router as lookup_router
 
@@ -111,6 +112,7 @@ async def get_assets():
 async def get_work_orders(status: Optional[str] = None):
     query = """
         SELECT w.id, w.repair_description as description, w.work_order_class as class, w.work_order_status as status,
+               w.asset_id, w.work_order_end_day as closed_date, w.key_insights,
                CASE WHEN EXISTS (SELECT 1 FROM work_order_task_item t WHERE t.work_order = w.id) THEN 1 ELSE 0 END as has_task,
                w.work_order_open_day as date,
                (SELECT t.work_order_task_item_open_day FROM work_order_task_item t WHERE t.work_order = w.id LIMIT 1) as schedule_date,
@@ -122,7 +124,12 @@ async def get_work_orders(status: Optional[str] = None):
                    WHERE ti.work_order = w.id
                    GROUP BY m.id
                    HAVING m.quantity_used > COALESCE(SUM(inv.stock_available_on_hand), 0)
-               ) THEN 1 ELSE 0 END as pr_needed
+               ) THEN 1 ELSE 0 END as pr_needed,
+               (SELECT wp.status 
+                FROM work_permit wp 
+                JOIN work_order_task_item ti ON wp.work_order_task_item = ti.id 
+                WHERE ti.work_order = w.id 
+                LIMIT 1) as permit_status
         FROM work_order w
     """
     if status:
@@ -146,31 +153,45 @@ async def get_diagnostic_work_orders():
     return safe_query(query)
 
 @app.get("/api/drilldown/safety-incidents")
-async def get_drilldown_incidents(filter: Optional[str] = None):
-    query = "SELECT * FROM incident_events"
-    if filter and filter != 'All':
-        query += f" WHERE incident_type = '{filter}'"
+async def get_drilldown_incidents(status: Optional[str] = None):
+    if not status or status == 'All':
+        return get_drilldown_data("safety-incidents")
+    query = "SELECT id, incident_type as type, description, severity, status FROM incident_events"
+    query += f" WHERE incident_type = '{status}'"
     return safe_query(query)
 
 @app.get("/api/drilldown/safety-compliance")
-async def get_drilldown_compliance(filter: Optional[str] = None):
-    query = "SELECT id, work_order, asset, type, status FROM work_permit"
-    if filter and filter != 'All':
-        query += f" WHERE type = '{filter}'"
+async def get_drilldown_compliance(status: Optional[str] = None):
+    if not status or status == 'All':
+        return get_drilldown_data("safety-compliance")
+    # Rule 13: List only permits which are active
+    query = """
+        SELECT wp.id, ti.work_order, ti.asset, wp.type, wp.status 
+        FROM work_permit wp
+        JOIN work_order_task_item ti ON wp.work_order_task_item = ti.id
+        WHERE LOWER(wp.status) = 'active'
+    """
+    query += f" AND wp.type = '{status}'"
     return safe_query(query)
 
 @app.get("/api/drilldown/manpower-utilization")
-async def get_drilldown_technicians(filter: Optional[str] = None):
+async def get_drilldown_technicians(status: Optional[str] = None):
+    if not status or status == 'All':
+        return get_drilldown_data("manpower-utilization")
     query = "SELECT name, role_designation as role, discipline_trade as discipline, standard_hourly_rate as rate FROM technician_engineer"
-    if filter and filter != 'All':
-        query += f" WHERE role_designation = '{filter}' OR discipline_trade = '{filter}'"
+    query += f" WHERE role_designation = '{status}' OR discipline_trade = '{status}'"
     return safe_query(query)
 
 @app.get("/api/drilldown/purchase-requisition")
-async def get_drilldown_prs(filter: Optional[str] = None):
-    query = "SELECT id, material_name as material, quantity, status FROM purchase_requisition"
-    if filter and filter != 'All':
-        query += f" WHERE LOWER(status) = '{filter.lower()}'"
+async def get_drilldown_prs(status: Optional[str] = None):
+    if not status or status == 'All':
+        return get_drilldown_data("purchase-requisition")
+    query = """
+        SELECT pr.id, mm.description as material, 5 as quantity, pr.status 
+        FROM purchase_requisition pr
+        JOIN material_master mm ON pr.material = mm.id
+    """
+    query += f" WHERE LOWER(pr.status) = '{status.lower()}'"
     return safe_query(query)
 
 @app.post("/api/work-order/{wo_id}/diagnose")
@@ -224,8 +245,21 @@ async def run_diagnosis(wo_id: str):
         else:
             result = json.loads(result_str)
         print(f"[Diagnosis API] Parsed Result: {result}")
-        # Add original description to result
+        # Add original description and asset info to result
         result["reported_issue"] = wo_details[0].get("repair_description")
+        
+        # Fetch asset details
+        asset_info = safe_query("SELECT name, location, criticality FROM asset WHERE id = ?", (asset_id,))
+        if asset_info:
+            result["asset_details"] = {
+                "id": asset_id,
+                "name": asset_info[0]['name'],
+                "location": asset_info[0]['location'],
+                "criticality": asset_info[0]['criticality']
+            }
+        else:
+            result["asset_details"] = {"id": asset_id, "name": "Unknown Asset"}
+            
         return result
     except Exception as e:
         print(f"[Diagnosis API] Parse Error: {e}")
@@ -251,28 +285,33 @@ async def approve_diagnosis(wo_id: str, payload: dict):
     
     try:
         # 1. Add Task Items
+        # Fetch all master tasks to match descriptions
+        cursor.execute("SELECT id, description FROM task")
+        master_tasks = cursor.fetchall()
+        
         for idx, task_desc in enumerate(tasks):
             ti_id = f"WOT-{wo_id[3:]}-{idx+1}"
+            
+            # Try to match task_desc to a master task ID
+            matched_task_id = "T-GEN-01" # Default fallback
+            for mt_id, mt_desc in master_tasks:
+                if mt_desc.lower() in task_desc.lower() or task_desc.lower() in mt_desc.lower():
+                    matched_task_id = mt_id
+                    break
+            
             cursor.execute("""
                 INSERT INTO work_order_task_item 
                 (id, work_order, asset, task, work_order_task_item_open_day)
                 VALUES (?, ?, ?, ?, ?)
-            """, (ti_id, wo_id, asset_id, task_desc, datetime.now().strftime("%d-%m-%y")))
+            """, (ti_id, wo_id, asset_id, matched_task_id, datetime.now().strftime("%d-%m-%y")))
             
         # 2. Update WO Status
         cursor.execute("UPDATE work_order SET work_order_status = 'Pending' WHERE id = ?", (wo_id,))
         conn.commit()
         
-        # 3. Trigger Auto-Pilot to populate the plan (Manpower, Materials, etc.)
-        from services.agent_manager import run_agent_workflow
-        print(f"[Approval API] Triggering Auto-Pilot for {wo_id}...")
-        try:
-            # We pass a message that specifically asks to plan this WO
-            run_agent_workflow("maintenance_auto_pilot", f"Please generate a complete execution plan for {wo_id} based on its newly diagnosed tasks.")
-        except Exception as ae:
-            print(f"[Approval API] Auto-Pilot Warning: {ae}")
-            # We don't fail the whole request if auto-pilot has a hiccup, 
-            # but it usually works fine.
+        # 3. Trigger Rule 10 Resource Processor (Automated AI Planning)
+        print(f"[Approval API] Triggering Rule 10 Processor for {wo_id}...")
+        process_work_order_resources(wo_id)
 
         print(f"[Approval API] SUCCESS: {wo_id} moved to Pending and planned.")
         return {"status": "success", "tasks_added": len(tasks)}
@@ -359,21 +398,14 @@ async def get_execution_advice(wo_id: str):
     """
     
     try:
-        import openai
-        client = openai.OpenAI(api_key=settings.openai_api_key)
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a world-class industrial maintenance consultant specializing in smelter operations."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        advice = response.choices[0].message.content
-    except Exception as e:
-        print(f"[OpenAI Error] {e}")
-        # Fallback to Gemini if OpenAI fails
         from services.agent_manager import generate_with_retry
-        advice = generate_with_retry(prompt)
+        advice = generate_with_retry(
+            prompt=prompt,
+            system_prompt="You are a world-class industrial maintenance consultant specializing in smelter operations."
+        )
+    except Exception as e:
+        print(f"[AI Error] {e}")
+        advice = "Could not generate execution advice due to AI provider availability."
     
     # 3. Save to Cache
     try:
@@ -528,17 +560,24 @@ Return ONLY valid JSON with exactly these keys:
 }"""
 
     try:
-        print(f"[Permit] Calling OpenAI GPT-4o for permit {permit_id}...")
-        response = _openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Generate a work permit document for:\n{context}"}
-            ],
-            response_format={"type": "json_object"}
+        from services.agent_manager import generate_with_retry
+        print(f"[Permit] Calling AI for permit {permit_id} via generate_with_retry...")
+        
+        prompt_full = f"Generate a work permit document for:\n{context}\n\nSTRICT: Return ONLY valid JSON as per system prompt."
+        
+        response_text = generate_with_retry(
+            prompt=prompt_full,
+            system_prompt=system_prompt
         )
-        ai_data = _json.loads(response.choices[0].message.content)
-        print(f"[Permit] OpenAI response received successfully for {permit_id}")
+        
+        # Extract JSON if wrapped in markdown
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+        ai_data = _json.loads(response_text)
+        print(f"[Permit] AI response received successfully for {permit_id}")
     except Exception as e:
         print(f"[Permit Generation AI ERROR] {type(e).__name__}: {e} | USING MOCK FALLBACK")
         # ── Mock Fallback ─────────────────────────────────────────────────────
@@ -1366,15 +1405,11 @@ async def generate_material_reservation(data: dict):
     prompt = f"Create a Material Reservation for {qty} units of '{material}' for Work Order {wo_id} (Asset: {asset_id} - {asset_name}). Period: {start_date_str} to {end_date_str}."
 
     try:
-        response = _openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
-        ai_data = _json.loads(response.choices[0].message.content)
+        from services.agent_manager import generate_with_retry
+        response_text = generate_with_retry(prompt=prompt, system_prompt=system_prompt)
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        ai_data = _json.loads(response_text)
         return ai_data
     except Exception as e:
         print(f"[MR Generation AI ERROR] {e} | USING MOCK FALLBACK")
@@ -1405,41 +1440,39 @@ async def generate_purchase_requisition(data: dict):
     asset_id = data.get("asset_id", "N/A")
     asset_name = data.get("asset_name", "N/A")
 
-    system_prompt = f"""You are a Senior Maintenance Engineer and Procurement Specialist at the Vedanta Jharsuguda Aluminum Smelter.
+    system_prompt = f"""You are a Senior Maintenance Lead and Procurement Strategist at the Vedanta Jharsuguda Aluminum Smelter, the largest smelter in India.
     Generate a high-detail, technically rigorous Purchase Requisition (PR) for internal engineering approval.
     
-    The 'justification' field MUST be extremely detailed (at least 150 words). It should:
-    1. Analyze the specific failure mode or degradation pattern of the '{material}' within the '{asset_name}' ({asset_id}).
-    2. Cite technical consequences of delay, such as production loss in the Potline, safety risks in the Cast House, or environmental non-compliance in the FTP (Fume Treatment Plant).
-    3. Explain the technical necessity of the requested specifications over standard alternatives.
+    CRITICAL (Rule 12): The PR MUST be rich in context of the asset, the aluminum smelting industry, and Vedanta Jharsuguda's operational standards.
     
-    Use industry-specific terminology related to aluminum smelting (e.g., cryolite corrosion, magnetic field interference, thermal cycling, or alumina handling).
+    The 'justification' field MUST be extremely detailed (at least 200 words). It should:
+    1. Analyze the specific failure mode or degradation pattern of the '{material}' within the '{asset_name}' ({asset_id}).
+    2. Cite technical consequences of delay specifically for Vedanta Jharsuguda (e.g., Potline instability, VAP throughput loss, or safety risks in the Casthouse).
+    3. Mention industrial standards like ISO 55001 or Vedanta's internal Technical Performance Standards (TPS).
+    
+    Use industry-specific terminology related to aluminum smelting (e.g., Busbar alignment, Alumina feeding accuracy, Bath chemistry, Pot voltage fluctuations).
     
     Return ONLY valid JSON with these keys:
     {{
       "pr_number": "PR-{wo_id[-4:]}-2026",
-      "requester_department": "Maintenance Division — Smelter Operations",
-      "justification": "Detailed 2-3 paragraph technical justification",
+      "requester_department": "Maintenance Division — Smelter Operations (Vedanta Jharsuguda)",
+      "justification": "Detailed 3-paragraph technical justification",
       "technical_specifications": "High-precision technical standards and tolerances for {material}",
-      "vendor_recommendations": ["List 2-3 globally recognized OEMs or certified local suppliers"],
+      "vendor_recommendations": ["List 2-3 globally recognized OEMs or Vedanta certified suppliers"],
       "estimated_budget": "Estimated cost for {qty} units in INR (₹)",
       "delivery_urgency": "IMMEDIATE (Production Critical) or STANDARD",
       "inspection_requirements": "Detailed QA/QC checklist and material test certificates (MTC) required",
-      "approval_workflow": "Engineering Manager -> Operations Head -> Finance Director"
+      "approval_workflow": "Maintenance Lead -> Operations Head -> Procurement Director"
     }}"""
 
     prompt = f"Create a Purchase Requisition for {qty} units of '{material}' for Work Order {wo_id} (Asset: {asset_id} - {asset_name})."
 
     try:
-        response = _openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
-        ai_data = _json.loads(response.choices[0].message.content)
+        from services.agent_manager import generate_with_retry
+        response_text = generate_with_retry(prompt=prompt, system_prompt=system_prompt)
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        ai_data = _json.loads(response_text)
         return ai_data
     except Exception as e:
         print(f"[PR Generation AI ERROR] {e} | USING MOCK FALLBACK")
@@ -1605,7 +1638,7 @@ async def get_pending_prs():
             mp.price_per_unit as unit_price
         FROM purchase_requisition pr
         JOIN material_master mm ON pr.material = mm.id
-        LEFT JOIN material_price mp ON mm.id = mp.id
+        LEFT JOIN material_price mp ON mm.id = mp.material
         WHERE LOWER(pr.status) = 'pending'
     """)
     prs = [dict(row) for row in cursor.fetchall()]

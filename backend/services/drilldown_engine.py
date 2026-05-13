@@ -172,6 +172,10 @@ def get_drilldown_data(kpi_id: str):
     elif kpi_id == "safety-compliance":
         data = safe_query("SELECT type as name, COUNT(*) as count FROM work_permit GROUP BY type")
         return {"chartType": "bar", "data": data, "title": "Permits Issued by Type"}
+
+    elif kpi_id == "safety-incidents":
+        data = safe_query("SELECT incident_type as name, COUNT(*) as count FROM incident_events GROUP BY incident_type")
+        return {"chartType": "bar", "data": data, "title": "Safety Incidents by Category"}
     
     # Fallback
     return {"chartType": "bar", "data": [{"name": "No Data", "count": 0}], "title": "Data Unavailable"}

@@ -10,22 +10,24 @@ import {
   Cpu,
   LayoutDashboard,
   Boxes,
-  HelpCircle
+  HelpCircle,
+  Search
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { usePathname } from 'next/navigation';
 
 const agents = [
   { id: 'maintenance_auto_pilot', name: 'Maintenance Auto-Pilot', icon: Bot, desc: 'Work Orders execution plan' },
+  { id: 'diagnostic_agent', name: 'Diagnostic Agent', icon: Zap, desc: 'Anomaly detection and analysis' },
+  { id: 'work_instruction_coach', name: 'Work Instruction Coach', icon: BookOpen, desc: 'Instruction guide' },
   { id: 'asset_strategy', name: 'Asset Strategy Agent', icon: Cpu, desc: 'Maintenance strategy' },
   { id: 'business_analyst', name: 'Intelligent Advisor', icon: BarChart3, desc: 'Intelligent review & reporting' },
-  { id: 'work_instruction_coach', name: 'Work Instruction Coach', icon: BookOpen, desc: 'Instruction guide' },
   { id: 'reliability_assistant', name: 'Reliability Assistant', icon: ShieldCheck, desc: 'Failure Prevention' },
   { id: 'asset_steward', name: 'Asset Steward', icon: Settings2, desc: 'Lifecycle Tracking' },
 ];
 
 const Sidebar = () => {
-  const { addChatMessage, setLoading, setActiveKpi, activeKpi } = useStore();
+  const { addChatMessage, setLoading, setActiveKpi, activeKpi, searchQuery, setSearchQuery } = useStore();
   const pathname = usePathname();
 
   const handleAgentClick = async (agentId: string, agentName: string) => {
@@ -43,6 +45,18 @@ const Sidebar = () => {
 
     if (agentId === 'work_instruction_coach') {
       setActiveKpi('work-instruction-coach');
+      setTimeout(() => {
+        const container = document.getElementById('scroll-container');
+        const element = document.getElementById('main-content-area');
+        if (container && element) {
+          container.scrollTo({ top: element.offsetTop - 20, behavior: 'smooth' });
+        }
+      }, 100);
+      return;
+    }
+
+    if (agentId === 'diagnostic_agent') {
+      setActiveKpi('diagnostic');
       setTimeout(() => {
         const container = document.getElementById('scroll-container');
         const element = document.getElementById('main-content-area');
@@ -80,42 +94,37 @@ const Sidebar = () => {
   return (
     <aside className="w-72 h-screen flex flex-col bg-white border-r border-slate-100 z-50">
       {/* Brand Header */}
-      <div className="p-6">
+      <div className="p-6 space-y-6">
         <div className="flex items-center gap-3">
           <div>
             <h1 className="text-base font-black text-slate-900 tracking-tighter uppercase">OmniMaintain</h1>
             <p className="text-[10px] text-indigo-600 font-bold tracking-widest uppercase">AI Engine</p>
           </div>
         </div>
+
+        {/* Sidebar Search */}
+        <div className="relative group">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={14} />
+          <input 
+            type="text" 
+            placeholder="Search plant data..."
+            value={searchQuery}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSearchQuery(val);
+              if (val.trim()) {
+                setActiveKpi('search');
+              } else {
+                setActiveKpi(null);
+              }
+            }}
+            className="w-full h-11 bg-slate-50 border border-slate-100 rounded-2xl pl-10 pr-4 text-xs font-bold focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all shadow-inner placeholder:text-slate-400"
+          />
+        </div>
       </div>
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-4 space-y-8 py-4">
-        {/* Main Menu */}
-        <div>
-          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-3 block">Dashboard</label>
-          <nav className="space-y-1">
-            <button
-              onClick={() => setActiveKpi(activeKpi === 'assets' ? null : null)}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors ${
-                activeKpi !== 'assets' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              <LayoutDashboard size={18} />
-              Overview
-            </button>
-            <button
-              onClick={() => setActiveKpi(activeKpi === 'assets' ? null : 'assets')}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors ${
-                activeKpi === 'assets' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              <Boxes size={18} />
-              Assets
-            </button>
-          </nav>
-        </div>
-
         {/* AI Toolkit */}
         <div>
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-3 block">Agent Toolkit</label>

@@ -285,6 +285,7 @@ def run_agent_workflow(agent_id: str, query: str = ""):
     # Map agent_id to specific pre-defined queries if none provided
     agent_prompts = {
         "maintenance_auto_pilot": "Analyze all plant KPIs and generate an immediate maintenance execution strategy.",
+        "diagnostic_agent": "Analyze all asset parameters and sensor data to detect anomalies and provide a detailed root cause analysis (RCA) for any performance issues.",
         "asset_strategy": "Review asset health and propose a long-term maintenance schedule optimization.",
         "business_analyst": "Provide a detailed business intelligence report on current plant performance and cost variance.",
         "work_instruction_coach": "List all pending work orders. For each work order, provide detailed work instructions for EVERY task item, including safety steps and necessary tools.",

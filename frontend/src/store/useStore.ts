@@ -22,6 +22,7 @@ interface MaintenanceStore {
   chatHistory: ChatMessage[];
   isLoading: boolean;
   activeKpi: string | null;
+  activeTab: string;
   isAuthenticated: boolean;
   searchQuery: string;
   setKPIs: (kpis: KPI[]) => void;
@@ -30,6 +31,7 @@ interface MaintenanceStore {
   addChatMessage: (message: ChatMessage) => void;
   setLoading: (loading: boolean) => void;
   setActiveKpi: (kpiId: string | null) => void;
+  setActiveTab: (tab: string) => void;
   setAuthenticated: (auth: boolean) => void;
   setSearchQuery: (query: string) => void;
 }
@@ -43,6 +45,7 @@ export const useStore = create<MaintenanceStore>((set) => ({
   ],
   isLoading: false,
   activeKpi: null,
+  activeTab: 'KPIs',
   isAuthenticated: false,
   searchQuery: '',
   setKPIs: (kpis) => set({ kpis }),
@@ -53,6 +56,7 @@ export const useStore = create<MaintenanceStore>((set) => ({
   })),
   setLoading: (loading) => set({ isLoading: loading }),
   setActiveKpi: (activeKpi) => set({ activeKpi }),
+  setActiveTab: (activeTab) => set({ activeTab }),
   setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
 }));

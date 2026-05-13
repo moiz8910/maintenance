@@ -1,12 +1,42 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Bell, User, Wifi, WifiOff, ChevronDown, Calendar, Search, Globe, LogOut } from 'lucide-react';
+import { 
+  Bell, 
+  User, 
+  Wifi, 
+  WifiOff, 
+  ChevronDown, 
+  Calendar, 
+  Search, 
+  Globe, 
+  LogOut,
+  Activity,
+  Package,
+  ClipboardList,
+  Users,
+  ShieldCheck,
+  Boxes,
+  BarChart3,
+  Cpu,
+  Layers,
+  UserCheck,
+  AlertTriangle
+} from 'lucide-react';
 import { useStore } from '@/store/useStore';
 
 const Header = () => {
   const [connected, setConnected] = useState(false);
-  const { setAuthenticated, searchQuery, setSearchQuery, setActiveKpi } = useStore();
+  const { setAuthenticated, searchQuery, setSearchQuery, setActiveKpi, activeTab, setActiveTab } = useStore();
   
+  const tabs = [
+    { name: 'Performance Mgmt.', icon: BarChart3, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
+    { name: 'Asset Info', icon: Cpu, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { name: 'Inventory Status', icon: Package, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+    { name: 'Work Mgmt.', icon: Layers, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    { name: 'Resource Mgmt.', icon: UserCheck, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+    { name: 'Safety', icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+  ];
+
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearchQuery(val);
@@ -33,52 +63,59 @@ const Header = () => {
   });
 
   return (
-    <header className="h-20 px-8 flex items-center justify-between shrink-0 bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100">
-      <div className="flex items-center gap-8 flex-1">
-        <div className="relative w-96 group">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={18} />
-          <input 
-            type="text" 
-            placeholder="Search assets, work orders, or manuals..."
-            value={searchQuery}
-            onChange={handleSearchChange}
-            className="w-full h-11 bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-4 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all"
-          />
-        </div>
-
-        <div className="flex items-center gap-6 text-slate-400">
-          <div className="flex items-center gap-2">
-            <Globe size={16} />
-            <span className="text-[10px] font-bold uppercase tracking-widest">Main Plant</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Calendar size={16} />
-            <span className="text-[10px] font-bold uppercase tracking-widest">{today}</span>
-          </div>
-        </div>
+    <header className="h-24 px-4 flex items-center justify-between shrink-0 bg-white/40 backdrop-blur-xl sticky top-0 z-40 border-b border-white/20 shadow-sm">
+      <div className="flex-1 flex items-center justify-center min-w-0">
+        {/* HD Navigation Tabs */}
+        <nav className="flex items-center gap-1.5 p-1 rounded-[32px] bg-white/40 border border-white/60 shadow-xl backdrop-blur-md w-full max-w-7xl justify-between">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.name;
+            const tabColorClass = tab.color.replace('text-', '');
+            const tabBgClass = tab.bg.replace('/10', '/15');
+            
+            return (
+              <button
+                key={tab.name}
+                onClick={() => setActiveTab(tab.name)}
+                className={`flex items-center justify-center transition-all duration-500 relative group flex-auto min-w-0 border-2 ${
+                  tab.name === 'Safety' ? 'gap-0 px-2' : 'gap-0.5 px-3'
+                } py-2.5 rounded-[22px] ${
+                  isActive 
+                  ? `bg-white shadow-2xl shadow-${tabColorClass}/30 border-slate-400` 
+                  : `${tabBgClass} border-slate-300 hover:bg-white/80 hover:border-slate-400`
+                }`}
+              >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-500 shadow-sm shrink-0 ${
+                  isActive 
+                  ? `${tab.bg.replace('/10', '')} text-white ring-2 ring-white/50` 
+                  : `bg-white/60 ${tab.color}`
+                }`}>
+                  <tab.icon size={20} strokeWidth={3} />
+                </div>
+                <div className="flex flex-col min-w-0 items-center">
+                  <span className={`text-[10px] font-black uppercase tracking-tight leading-[1.1] text-center break-words line-clamp-2 ${
+                    isActive ? 'text-slate-900' : 'text-slate-800'
+                  }`}>
+                    {tab.name}
+                  </span>
+                </div>
+                
+                {isActive && (
+                  <div className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-1 rounded-full ${tab.color.replace('text-', 'bg-')} shadow-[0_0_12px] ${tab.color.replace('text-', 'shadow-')}`} />
+                )}
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
-      <div className="flex items-center gap-6">
-        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${
-          connected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
-        }`}>
-          <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${connected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-          {connected ? 'System Live' : 'System Offline'}
-        </div>
-
-        <button className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-indigo-600 transition-all relative">
-          <Bell size={20} />
-          <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-indigo-500 rounded-full border-2 border-white" />
-        </button>
-
+      <div className="shrink-0 ml-4">
         <button 
           onClick={() => setAuthenticated(false)}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-rose-600 transition-all shadow-lg shadow-slate-900/10"
+          className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.1em] hover:bg-rose-600 transition-all shadow-2xl shadow-slate-900/10 border border-slate-800 group"
         >
-          <LogOut size={14} />
-          Log Out
+          <LogOut size={18} strokeWidth={3} />
+          <span className="font-black">Log Off</span>
         </button>
-
       </div>
     </header>
   );

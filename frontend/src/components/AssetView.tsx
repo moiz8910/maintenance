@@ -20,6 +20,8 @@ interface Asset {
   sop_number: number | null;
   sop_description: string | null;
   parent_name: string | null;
+  parent_id: string | null;
+  parent_location: string | null;
 }
 
 type SortKey = keyof Asset;
@@ -43,13 +45,13 @@ const PAGE_SIZE = 50;
 const cols: { key: SortKey; label: string }[] = [
   { key: 'id',                 label: 'Asset ID' },
   { key: 'name',               label: 'Name' },
-  { key: 'parent_name',        label: 'Parent Asset' },
+  { key: 'criticality',        label: 'Criticality' },
   { key: 'mttr',               label: 'MTTR' },
   { key: 'mtbf',               label: 'MTBF' },
   { key: 'unplanned_downtime', label: 'Unplanned DT' },
   { key: 'location',           label: 'Location' },
   { key: 'sop_number',         label: 'SOP' },
-  { key: 'criticality',        label: 'Criticality' },
+  { key: 'parent_name',        label: 'Parent Asset' },
   { key: 'asset_type',         label: 'Type' },
 ];
 
@@ -60,6 +62,7 @@ export default function AssetView({ onClose }: { onClose: () => void }) {
   const [sortKey, setSortKey]     = useState<SortKey>('id');
   const [sortAsc, setSortAsc]     = useState(true);
   const [selected, setSelected]   = useState<Asset | null>(null);
+  const [hierarchyParent, setHierarchyParent] = useState<{id: string, name: string, location: string} | null>(null);
   const [page, setPage]           = useState(1);
 
   // Refs for synced dual-scrollbar
@@ -137,7 +140,74 @@ export default function AssetView({ onClose }: { onClose: () => void }) {
       : <ChevronUp size={12} className="text-slate-500 shrink-0" />;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col min-h-[800px]">
+      {/* ── Hierarchy Modal ─────────────────────────────────── */}
+      {hierarchyParent && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setHierarchyParent(null)} />
+          <div className="relative w-full max-w-2xl bg-white rounded-[32px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-8">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-xs font-black text-indigo-600 uppercase tracking-[0.2em]">Asset Hierarchy</h3>
+                  <p className="text-2xl font-black text-slate-900 mt-1">Structure Analysis</p>
+                </div>
+                <button onClick={() => setHierarchyParent(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                  <X size={20} className="text-slate-400" />
+                </button>
+              </div>
+
+              <div className="space-y-8">
+                {/* Parent Node */}
+                <div className="relative">
+                  <div className="flex items-center gap-4 bg-indigo-600 p-6 rounded-2xl text-white shadow-xl shadow-indigo-100">
+                    <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                      <Boxes size={24} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Parent Asset</p>
+                      <h4 className="text-lg font-black truncate">{hierarchyParent.name}</h4>
+                      <p className="text-xs font-bold opacity-80 mt-1">{hierarchyParent.id} &bull; {hierarchyParent.location}</p>
+                    </div>
+                  </div>
+                  
+                  {/* Vertical Line */}
+                  <div className="absolute left-[34px] top-full w-0.5 h-8 bg-slate-200" />
+                </div>
+
+                {/* Children Section */}
+                <div className="pt-2 pl-8 space-y-3">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Direct Descendants</p>
+                  <div className="grid grid-cols-1 gap-3">
+                    {assets.filter(a => a.parent_id === hierarchyParent.id).length > 0 ? (
+                      assets.filter(a => a.parent_id === hierarchyParent.id).map(child => (
+                        <div key={child.id} className="flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 group hover:border-indigo-200 transition-colors">
+                          <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shrink-0 border border-slate-100 text-slate-400 group-hover:text-indigo-600 group-hover:border-indigo-100 transition-colors">
+                            <Boxes size={16} />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-slate-800">{child.name}</p>
+                            <p className="text-[10px] font-bold text-slate-400">{child.id} &bull; {child.asset_type}</p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">No direct descendants found for this asset.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-10 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest leading-relaxed">
+                  Note: This hierarchy represents the physical and functional linkage of assets within the Vedanta Jharsuguda operational structure.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Panel Header ─────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
@@ -191,16 +261,16 @@ export default function AssetView({ onClose }: { onClose: () => void }) {
           <div
             ref={tableScrollRef}
             onScroll={onTableScroll}
-            className="flex-1 overflow-auto rounded-b-xl border border-slate-200 shadow-sm"
+            className="flex-1 min-h-[600px] overflow-auto rounded-b-xl border border-slate-200 shadow-sm"
           >
             <table ref={tableWidthRef} className="text-xs border-collapse" style={{ minWidth: '100%' }}>
-              <thead className="sticky top-0 z-10">
+              <thead className="z-10">
                 <tr className="bg-slate-800 text-white">
                   {cols.map(c => (
                     <th
                       key={c.key}
                       onClick={() => handleSort(c.key)}
-                      className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest cursor-pointer select-none whitespace-nowrap hover:bg-slate-700 transition-colors"
+                      className="sticky top-0 px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest cursor-pointer select-none whitespace-nowrap hover:bg-slate-700 transition-colors z-20 bg-slate-800"
                     >
                       <span className="flex items-center gap-1">
                         {c.label}
@@ -225,8 +295,13 @@ export default function AssetView({ onClose }: { onClose: () => void }) {
                       <td className="px-4 py-2.5 font-black text-slate-800 whitespace-nowrap">{a.id}</td>
                       {/* 2. Name */}
                       <td className="px-4 py-2.5 font-semibold text-slate-700 whitespace-nowrap">{a.name}</td>
-                      {/* 3. Parent Asset */}
-                      <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{a.parent_name ?? '—'}</td>
+                      {/* 3. Criticality */}
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {crit
+                          ? <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${crit.color}`}>{crit.label}</span>
+                          : <span className="text-slate-400">—</span>
+                        }
+                      </td>
                       {/* 4. MTTR */}
                       <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{fmt(a.mttr, a.mttr_uom)}</td>
                       {/* 5. MTBF */}
@@ -242,12 +317,25 @@ export default function AssetView({ onClose }: { onClose: () => void }) {
                           : <span className="text-slate-400">—</span>
                         }
                       </td>
-                      {/* 9. Criticality (second last) */}
+                      {/* 9. Parent Asset */}
                       <td className="px-4 py-2.5 whitespace-nowrap">
-                        {crit
-                          ? <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${crit.color}`}>{crit.label}</span>
-                          : <span className="text-slate-400">—</span>
-                        }
+                        {a.parent_name ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHierarchyParent({
+                                id: a.parent_id!,
+                                name: a.parent_name!,
+                                location: a.parent_location!
+                              });
+                            }}
+                            className="text-indigo-600 font-bold hover:underline hover:text-indigo-800 transition-colors"
+                          >
+                            {a.parent_name}
+                          </button>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
                       {/* 10. Type (last) */}
                       <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{a.asset_type ?? '—'}</td>

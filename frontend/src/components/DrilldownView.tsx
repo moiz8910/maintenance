@@ -23,6 +23,23 @@ import remarkGfm from 'remark-gfm';
 
 const COLORS = ['#0f172a', '#6366f1', '#10b981', '#f59e0b', '#ef4444'];
 
+const STATUS_COLORS: Record<string, string> = {
+  'Pending': '#6366f1',      // Indigo
+  'In Progress': '#10b981',  // Emerald
+  'In-Progress': '#10b981',
+  'Completed': '#0f172a',    // Slate
+  'Closed': '#0f172a',
+  'Approved': '#10b981',
+  'Issued': '#f59e0b',       // Amber
+  'Warning': '#f59e0b',
+  'Critical': '#ef4444',     // Red
+  'Action Required': '#ef4444'
+};
+
+const getStatusColor = (status: string, index: number) => {
+  return STATUS_COLORS[status] || COLORS[index % COLORS.length];
+};
+
 interface DrilldownViewProps {
   kpiId: string;
   onClose: () => void;
@@ -43,6 +60,58 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
   const [fetchingWo, setFetchingWo] = useState(false);
   const [classFilter, setClassFilter] = useState<string>('All');
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({ key: 'class', direction: 'asc' });
+  const [selectedPr, setSelectedPr] = useState<any>(null);
+  const [generatingPr, setGeneratingPr] = useState(false);
+  const [downloadingDocx, setDownloadingDocx] = useState(false);
+
+  const handleViewPr = async (pr: any) => {
+    setGeneratingPr(true);
+    try {
+      const res = await fetch('/api/purchase-requisition/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          material: pr.material,
+          quantity: pr.quantity || 5,
+          work_order_id: `WO-PR-${pr.id}`,
+          asset_id: "ASSET-GENERIC",
+          asset_name: "Smelter Component"
+        })
+      });
+      if (!res.ok) throw new Error('Generation failed');
+      const json = await res.json();
+      setSelectedPr({ ...json, matName: pr.material, matQty: pr.quantity || 5 });
+    } catch (e) {
+      console.error('Failed to generate PR:', e);
+      alert('Failed to generate AI Purchase Requisition.');
+    } finally {
+      setGeneratingPr(false);
+    }
+  };
+
+  const handleDownloadPr = async () => {
+    if (!selectedPr) return;
+    setDownloadingDocx(true);
+    try {
+      const res = await fetch('/api/purchase-requisition/download-docx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(selectedPr)
+      });
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PurchaseRequisition_${selectedPr.pr_number}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.error('Failed to download PR docx:', e);
+    } finally {
+      setDownloadingDocx(false);
+    }
+  };
 
   // Auto-fetch work orders if initialStatus is provided
   useEffect(() => {
@@ -56,7 +125,8 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
     const supported = ['work-order', 'safety-incidents', 'manpower-utilization', 'purchase-requisition'];
     if (!bypassKpiCheck && !supported.includes(kpiId)) return;
 
-    const value = entry.name;
+    const value = entry?.name;
+    if (!value) return;
     setSelectedStatus(value);
     setFetchingWo(true);
     try {
@@ -88,6 +158,29 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
   // Helper to render table headers based on KPI
   const renderTableHeaders = () => {
     if (kpiId === 'work-order') {
+      if (selectedStatus === 'Closed') {
+        return (
+          <>
+            <th onClick={() => requestSort('id')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+              <div className="flex items-center gap-1">Work order ID {sortConfig?.key === 'id' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+            </th>
+            <th onClick={() => requestSort('asset_id')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+              <div className="flex items-center gap-1">Asset ID {sortConfig?.key === 'asset_id' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+            </th>
+            <th onClick={() => requestSort('class')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+              <div className="flex items-center gap-1">WO Class {sortConfig?.key === 'class' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+            </th>
+            <th onClick={() => requestSort('date')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+              <div className="flex items-center gap-1">WO Open Date {sortConfig?.key === 'date' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+            </th>
+            <th onClick={() => requestSort('closed_date')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+              <div className="flex items-center gap-1">WO Closed Date {sortConfig?.key === 'closed_date' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
+            </th>
+            <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Description</th>
+            <th className="px-4 py-3 text-[9px] font-black text-indigo-600 uppercase tracking-widest border-b border-slate-100 bg-indigo-50/30">Key Insights (AI)</th>
+          </>
+        );
+      }
       return (
         <>
           <th onClick={() => requestSort('id')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
@@ -102,6 +195,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
           <th onClick={() => requestSort('class')} className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
             <div className="flex items-center gap-1">Class {sortConfig?.key === 'class' ? (sortConfig.direction === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />) : <ArrowUpDown size={10} className="opacity-30" />}</div>
           </th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Permit</th>
           <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Description</th>
           <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Actions</th>
         </>
@@ -134,6 +228,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
           <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Material</th>
           <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Quantity</th>
           <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Status</th>
+          <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Action</th>
         </>
       );
     }
@@ -154,6 +249,27 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
   // Helper to render table rows based on KPI
   const renderTableRows = (row: any, i: number) => {
     if (kpiId === 'work-order') {
+      if (selectedStatus === 'Closed') {
+        return (
+          <tr key={i} className="hover:bg-slate-50 cursor-pointer transition-colors group" onClick={() => window.open(`/work-order/${row.id}`, '_blank')}>
+            <td className="px-4 py-3 text-[10px] font-bold text-slate-900">{row.id}</td>
+            <td className="px-4 py-3 text-[10px] font-bold text-indigo-600">{row.asset_id || '—'}</td>
+            <td className="px-4 py-3 text-[10px] font-bold text-slate-700">
+              <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{row.class}</span>
+            </td>
+            <td className="px-4 py-3 text-[10px] font-bold text-slate-500 whitespace-nowrap">{row.date || '—'}</td>
+            <td className="px-4 py-3 text-[10px] font-black text-emerald-600 whitespace-nowrap">{row.closed_date || '—'}</td>
+            <td className="px-4 py-3 text-[10px] text-slate-600 max-w-[200px] truncate" title={row.description}>{row.description}</td>
+            <td className="px-4 py-3 text-[10px] font-medium text-slate-700 bg-indigo-50/20 italic leading-relaxed">
+              {row.key_insights || (
+                <span className="text-slate-300 animate-pulse flex items-center gap-1">
+                  <Sparkles size={10} /> AI Insight Pending...
+                </span>
+              )}
+            </td>
+          </tr>
+        );
+      }
       return (
         <tr key={i} className="hover:bg-indigo-50/50 cursor-pointer transition-colors group" onClick={() => { setSelectedWorkOrder(row.id); setModalType(viewSource === 'coach' ? 'advise' : 'plan'); }}>
           <td className="px-4 py-3 text-[10px] font-bold text-indigo-600 group-hover:text-indigo-700 transition-colors">{row.id}</td>
@@ -162,7 +278,12 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
           <td className="px-4 py-3 text-[10px] font-bold text-slate-700">
             <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{row.class}</span>
           </td>
-          <td className="px-4 py-3 text-[10px] text-slate-600 max-w-[260px] truncate" title={row.description}>{row.description}</td>
+          <td className="px-4 py-3 text-[10px] font-bold">
+            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${row.permit_status?.toLowerCase() === 'active' || row.permit_status?.toLowerCase() === 'available' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
+              {row.permit_status || 'Missing'}
+            </span>
+          </td>
+          <td className="px-4 py-3 text-[10px] text-slate-600 max-w-[200px] truncate" title={row.description}>{row.description}</td>
           <td className="px-4 py-3 text-[10px] font-bold">
             <span className={`px-2 py-1 rounded-full font-black ${statusBadge(row.status)} hover:ring-2 hover:ring-indigo-300 transition-all cursor-pointer`}>{viewSource === 'coach' ? 'Execution Advice' : 'Execution Plan'}</span>
           </td>
@@ -191,14 +312,27 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
     }
     if (kpiId === 'purchase-requisition') {
       return (
-        <tr key={i} className="hover:bg-slate-50 transition-colors">
-          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600">{row.id}</td>
+        <tr 
+          key={i} 
+          className="hover:bg-indigo-50 transition-colors cursor-pointer group"
+          onClick={() => handleViewPr(row)}
+        >
+          <td className="px-4 py-3 text-[10px] font-bold text-indigo-600 group-hover:underline">{row.id}</td>
           <td className="px-4 py-3 text-[10px] font-bold text-slate-700">{row.material}</td>
           <td className="px-4 py-3 text-[10px] font-black text-slate-900 text-right">{row.quantity}</td>
           <td className="px-4 py-3 text-center">
             <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${row.status.toLowerCase() === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
               {row.status}
             </span>
+          </td>
+          <td className="px-4 py-3 text-right">
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleViewPr(row); }}
+              className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700 transition-all flex items-center gap-1 ml-auto"
+            >
+              <Sparkles size={10} />
+              View AI PR
+            </button>
           </td>
         </tr>
       );
@@ -290,13 +424,12 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
     const fetchData = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/drilldown/${kpiId}`);
-        const json = await res.json();
-        console.log(`[Stage 8] Drilldown Data Fetched for: ${kpiId}`);
-        setData(json);
-        getAiInsight(json);
-      } catch (e) {
-        console.error(`[Stage 8] Error fetching drilldown data:`, e);
+        const response = await fetch(`/api/drilldown/${kpiId}`);
+        const result = await response.json();
+        setData(result);
+        getAiInsight(result);
+      } catch (error) {
+        console.error('Error fetching drilldown data:', error);
       } finally {
         setLoading(false);
       }
@@ -307,11 +440,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
   const getAiInsight = async (contextData: any) => {
     setAiLoading(true);
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: `Analyze the provided chart data specifically for the '${kpiId.replace(/-/g, ' ')}' KPI. Be extremely concise and sharp. Avoid any verbose explanations. Structure your response EXACTLY in three parts:
+      let prompt = `Analyze the provided chart data specifically for the '${kpiId.replace(/-/g, ' ')}' KPI. Be extremely concise and sharp. Avoid any verbose explanations. Structure your response EXACTLY in three parts:
 **Internal**
 - 1-2 sharp bullet points on internal chart trends.
 
@@ -319,12 +448,38 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
 - 1-2 sharp bullet points on global aluminum industry benchmarks for this KPI.
 
 **Conclusion**
-- A single concluding sentence.`,
+- A single concluding sentence.`;
+
+      if (kpiId === 'safety-compliance') {
+        prompt = `Analyze the current safety permit data for Vedanta Jharsuguda provided in the context.
+Rule 13 Requirement: Generate sharp, technical commentary and insights related ONLY to the specific permit types and counts listed in the data. 
+
+STRICT RULES:
+1. NO generic safety advice or general industry standards.
+2. EVERY insight must be directly tied to the permit types present in the table (e.g., if there are 5 'Hot Work' permits, focus on those).
+3. Suggest specific technical safety measures or operational risks unique to the current distribution of permits.
+4. Keep it concise, industrial, and high-fidelity.
+
+Format:
+**Permit Context Analysis**
+- [Insight based on permit distribution]
+
+**Targeted Safety Controls**
+- [Technical measure specific to the most frequent permit types]
+
+**Operational Risk Note**
+- [Single sharp note on current risk posture based on active permits]`;
+      }
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          message: prompt,
           context_data: contextData 
         })
       });
       const json = await res.json();
-      console.log("[Stage 9] AI Insights Generated Successfully");
       setAiInsight(json.answer);
     } catch (e) {
       console.error("[Stage 9] Error generating AI insights:", e);
@@ -417,7 +572,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
               fetchingWo ? (
                 <div className="flex items-center justify-center py-16"><Loader2 className="animate-spin text-indigo-600" size={24} /></div>
               ) : (
-                <div className="rounded-xl border border-slate-100 bg-white overflow-hidden shadow-sm">
+                <div className="rounded-xl border border-slate-100 bg-white overflow-auto shadow-sm custom-scrollbar">
                   <table className="w-full text-left">
                     <thead className="bg-slate-50 sticky top-0 shadow-sm">
                       <tr>
@@ -442,7 +597,10 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
-                  <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                  <Tooltip 
+                    labelFormatter={() => ''}
+                    contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
+                  />
                   <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
                   
                   {kpiId === 'pm-adherence' ? (
@@ -467,7 +625,7 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
-                  <Tooltip cursor={{fill: '#f8fafc'}} />
+                  <Tooltip cursor={{fill: '#f8fafc'}} labelFormatter={() => ''} />
                   <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
                   <Bar dataKey={Object.keys(chartData[0] || {})[1]} name={capitalize(Object.keys(chartData[0] || {})[1] || '')} fill="#0f172a" radius={[4, 4, 0, 0]}>
                     <LabelList dataKey={Object.keys(chartData[0] || {})[1]} position="top" style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
@@ -511,8 +669,29 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                       <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 9, fontWeight: 700}} />
                     </>
                   )}
-                  <Tooltip cursor={{fill: '#f8fafc'}} />
-                  <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '10px' }} />
+                  <Tooltip cursor={{fill: '#f8fafc'}} labelFormatter={() => ''} />
+                  <Legend 
+                    verticalAlign="bottom" 
+                    height={36} 
+                    content={(props) => {
+                      const { payload } = props;
+                      return (
+                        <div className="flex flex-wrap justify-center gap-4 mt-4">
+                          {chartData.map((entry: any, index: number) => (
+                            <div key={`item-${index}`} className="flex items-center gap-1.5">
+                              <div 
+                                className="w-2 h-2 rounded-full" 
+                                style={{ backgroundColor: getStatusColor(entry.name, index) }} 
+                              />
+                              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                {entry.name}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }}
+                  />
                   <Bar 
                     dataKey={Object.keys(chartData[0] || {})[1] || 'count'} 
                     name={kpiId === 'safety-compliance' ? 'Permit Compliance' : (kpiId === 'safety-incidents' ? 'Safety Incidents' : capitalize(Object.keys(chartData[0] || {})[1] || 'count'))} 
@@ -520,13 +699,13 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
                     barSize={24} 
                     onClick={handleBarClick}
                   >
-                    <LabelList dataKey={Object.keys(chartData[0] || {})[1] || 'count'} position={data?.chartType === 'horizontal-bar' ? "right" : "top"} style={{ fill: '#94a3b8', fontSize: 9, fontWeight: 700 }} />
+                    <LabelList dataKey={Object.keys(chartData[0] || {})[1] || 'count'} position={data?.chartType === 'horizontal-bar' ? "right" : "top"} style={{ fill: '#475569', fontSize: 9, fontWeight: 900 }} />
                     {chartData.map((entry: any, index: number) => {
                       const supported = ['work-order', 'safety-incidents', 'manpower-utilization', 'purchase-requisition'];
                       return (
                         <Cell 
                           key={`cell-${index}`} 
-                          fill={COLORS[index % COLORS.length]} 
+                          fill={getStatusColor(entry.name, index)} 
                           cursor={supported.includes(kpiId) ? 'pointer' : 'default'} 
                         />
                       );
@@ -586,6 +765,105 @@ const DrilldownView: React.FC<DrilldownViewProps> = ({ kpiId, onClose, initialSt
           workOrderId={selectedWorkOrder} 
           onClose={() => setSelectedWorkOrder(null)} 
         />
+      )}
+
+      {/* AI PR Modal Overlay */}
+      {generatingPr && (
+        <div className="fixed inset-0 z-[11000] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white p-8 rounded-3xl shadow-2xl flex items-center gap-4 border border-indigo-100">
+            <Loader2 className="animate-spin text-indigo-600" size={24} />
+            <div>
+              <p className="text-sm font-black text-slate-900">Generating AI Purchase Requisition...</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Vedanta Jharsuguda Smart Procurement</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedPr && (
+        <div className="fixed inset-0 z-[11000] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-6">
+          <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl">
+                  <FileText size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">AI Purchase Requisition</h3>
+                  <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest">{selectedPr.pr_number}</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedPr(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+              <div className="space-y-8">
+                <div className="grid grid-cols-2 gap-8 p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Material</p>
+                    <p className="text-sm font-bold text-slate-900">{selectedPr.matName}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Quantity</p>
+                    <p className="text-sm font-black text-slate-900">{selectedPr.matQty} Units</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Estimated Budget</p>
+                    <p className="text-sm font-black text-emerald-600">{selectedPr.estimated_budget}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Urgency</p>
+                    <span className="px-2 py-1 bg-rose-100 text-rose-700 text-[10px] font-black rounded-md">{selectedPr.delivery_urgency}</span>
+                  </div>
+                </div>
+
+                <section>
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <Sparkles size={14} className="text-indigo-500" /> Technical Justification (Rule 12 Compliant)
+                  </h4>
+                  <div className="p-6 bg-indigo-50/30 border border-indigo-100 rounded-2xl">
+                    <p className="text-sm text-slate-700 leading-relaxed font-medium whitespace-pre-wrap">{selectedPr.justification}</p>
+                  </div>
+                </section>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <section>
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-3">Technical Specifications</h4>
+                    <p className="text-sm text-slate-600 leading-relaxed">{selectedPr.technical_specifications}</p>
+                  </section>
+                  <section>
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-3">Vendor Recommendations</h4>
+                    <ul className="space-y-2">
+                      {selectedPr.vendor_recommendations?.map((v: string, i: number) => (
+                        <li key={i} className="flex items-center gap-2 text-sm text-slate-600 font-medium">
+                          <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
+                          {v}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Generated for Vedanta Jharsuguda</span>
+              </div>
+              <button 
+                onClick={handleDownloadPr}
+                disabled={downloadingDocx}
+                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl text-sm font-black hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
+              >
+                {downloadingDocx ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                Download as Word (.docx)
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

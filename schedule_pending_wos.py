@@ -59,31 +59,58 @@ def schedule_wos():
     # ── 3. Build day-bucket schedule ──────────────────────────────────────────
     # Task items are scheduled from TODAY onwards, max MAX_PER_DAY/day
     # WO open_day is set to today-2 or today-3 (raised before scheduling)
-    schedule_day = SCHEDULE_FROM
-    wos_on_day = 0
+    # Track daily assignments to respect MAX_PER_DAY
+    daily_assignments = {} # date_obj -> count
 
     # Track globally unique task item IDs across the run
     used_task_item_ids = set()
 
-    for wo in ordered_wos:
+    for idx, wo in enumerate(ordered_wos):
         wo_id      = wo['wo_id']
         criticality = wo.get('criticality', 9)
         repair_type = (wo.get('repair_type') or '').lower()
         wo_class    = (wo.get('work_order_class') or '').upper()
 
-        # Advance task-scheduling day when slot is full
-        if wos_on_day >= MAX_PER_DAY:
-            schedule_day = schedule_day + timedelta(days=1)
-            wos_on_day = 0
-        wos_on_day += 1
-
-        # Task item date = current scheduling day (today or future)
-        task_date_str = schedule_day.strftime("%d-%m-%y")
-
-        # WO open date = 2 or 3 days BEFORE today (WO was raised earlier)
-        wo_open_offset = random.choice(WO_OPEN_OFFSETS)
-        wo_open_day = TODAY + timedelta(days=wo_open_offset)
+        # ── 3.5 Calculate Schedule Date based on Open Day + Lead Time ────────
+        # Get existing open day if available, else generate one
+        cursor.execute("SELECT work_order_open_day FROM work_order WHERE id = ?", (wo_id,))
+        existing_open = cursor.fetchone()[0]
+        if existing_open:
+            try:
+                d, m, y = existing_open.split('-')
+                wo_open_day = datetime(2000 + int(y), int(m), int(d))
+            except:
+                wo_open_day = TODAY + timedelta(days=random.choice(WO_OPEN_OFFSETS))
+        else:
+            wo_open_day = TODAY + timedelta(days=random.choice(WO_OPEN_OFFSETS))
+        
+        # Get Max Lead Time
+        cursor.execute("""
+            SELECT MAX(m.lead_time) 
+            FROM task_material_linkage m 
+            JOIN work_order_task_item t ON m.work_order_task_item = t.id 
+            WHERE t.work_order = ?
+        """, (wo_id,))
+        max_lead = cursor.fetchone()[0] or 0
+        
+        # Logic: Schedule Date = Open Day + Lead Time
+        # fallback to TODAY if the calculated date is in the past
+        target_date = wo_open_day + timedelta(days=max_lead)
+        if target_date < TODAY:
+            target_date = TODAY
+            
+        # Capacity check: Find next available slot on or after target_date
+        candidate_day = target_date
+        while daily_assignments.get(candidate_day, 0) >= MAX_PER_DAY:
+            candidate_day += timedelta(days=1)
+        
+        daily_assignments[candidate_day] = daily_assignments.get(candidate_day, 0) + 1
+        task_date_str = candidate_day.strftime("%d-%m-%y")
         wo_open_date_str = wo_open_day.strftime("%d-%m-%y")
+
+        # Log logic application
+        if max_lead > 0:
+            print(f"  [Rule Applied] {wo_id}: Opened {wo_open_date_str} + {max_lead}d Lead = Target {target_date.strftime('%d-%m-%y')}. Scheduled: {task_date_str}")
 
         # ── 4. Clear old task items for this WO ──────────────────────────────
         old_task_items = [r[0] for r in cursor.execute(
@@ -169,16 +196,28 @@ def schedule_wos():
             """, (unique_id, tech_id, duration))
 
             # ── 50% chance to assign materials ────────────────────────────────
-            if random.random() < 0.5 and available_materials:
+            # Force at least 2 WOs to have shortages
+            force_shortage = (idx < 2) 
+            
+            if (random.random() < 0.5 or force_shortage) and available_materials:
                 num_mats = random.randint(1, 3)
                 chosen_mats = random.sample(available_materials, min(num_mats, len(available_materials)))
                 for mat in chosen_mats:
+                    # If forcing shortage, set quantity_used > available
                     qty = random.randint(1, 5)
+                    lead_time = None
+                    
+                    if force_shortage:
+                        cursor.execute("SELECT SUM(stock_available_on_hand) FROM on_hand_inventory WHERE material = ?", (mat['material_id'],))
+                        avail = cursor.fetchone()[0] or 0
+                        qty = avail + random.randint(5, 15)
+                        lead_time = random.randint(5, 14) # Ensure a lead time exists for PR
+                    
                     cursor.execute("""
                         INSERT INTO task_material_linkage 
-                            (work_order_task_item, material_used, quantity_used, material_price)
-                        VALUES (?, ?, ?, ?)
-                    """, (unique_id, mat['material_id'], qty, mat['id']))
+                            (work_order_task_item, material_used, quantity_used, material_price, lead_time)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (unique_id, mat['material_id'], qty, mat['id'], lead_time))
 
         # ── 7. Update WO open day/time (raised 2-3 days before scheduling) ──
         wo_open_min  = earliest_start_min - 30
@@ -198,11 +237,10 @@ def schedule_wos():
     conn.commit()
     conn.close()
 
-    last_day = schedule_day.strftime("%d-%m-%y")
-    total_days = (schedule_day - SCHEDULE_FROM).days + 1
+    total_days = (max(daily_assignments.keys()) - TODAY).days + 1 if daily_assignments else 0
     print(f"\nScheduling complete: {len(ordered_wos)} WOs across {total_days} day(s)")
     print(f"  WO open dates: {(TODAY + timedelta(days=-3)).strftime('%d-%m-%y')} to {(TODAY + timedelta(days=-2)).strftime('%d-%m-%y')} (today-3 to today-2)")
-    print(f"  Tasks scheduled: {SCHEDULE_FROM.strftime('%d-%m-%y')} -> {last_day} (today onwards)")
+    print(f"  Tasks scheduled: {TODAY.strftime('%d-%m-%y')} onwards")
 
 if __name__ == "__main__":
     schedule_wos()
